@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+.cache/
+*.log
+.env
+.env.local
+coverage/
+.DS_Store
+Thumbs.db
+.playwright-mcp/
+video_production/
+scripts/
+*.py
+*.mp4
+*.webm
+NER-MIND_SIH_*
