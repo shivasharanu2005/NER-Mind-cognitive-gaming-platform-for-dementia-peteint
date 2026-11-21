@@ -1,0 +1,3 @@
+[build]
+  command = "npm --workspace @ner-mind/core run build && npm --workspace @ner-mind/patient-app run build"
+  publish = "packages/patient-app/dist"
