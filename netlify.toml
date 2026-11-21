@@ -1,0 +1,29 @@
+# Netlify Configuration for NER-MIND Patient App Monorepo
+
+[build]
+  # Build command will build core first if needed and package patient-app
+  command = "npm run build:patient"
+  publish = "packages/patient-app/dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# SPA redirect for client-side routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Security and caching headers
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

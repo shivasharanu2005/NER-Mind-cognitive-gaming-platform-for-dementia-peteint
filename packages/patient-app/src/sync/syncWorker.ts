@@ -232,7 +232,7 @@ export class SyncWorker {
           this.authToken = null;
           this.currentState = 'AUTH_REQUIRED';
           this.lastError = 'Session expired or unauthorized.';
-          await IndexedDbStorageService.markSyncFailed(batch.events.map(e => e.eventId), 'Unauthorized');
+          await IndexedDbStorageService.markSyncFailed(batch.events.map((e: any) => e.eventId), 'Unauthorized');
           this.isSyncing = false;
           this.notify();
           return false;
@@ -248,7 +248,7 @@ export class SyncWorker {
       if (Array.isArray(result.processedEventIds)) {
         await IndexedDbStorageService.acknowledgeSynced(result.processedEventIds);
       } else {
-        await IndexedDbStorageService.acknowledgeSynced(batch.events.map(e => e.eventId));
+        await IndexedDbStorageService.acknowledgeSynced(batch.events.map((e: any) => e.eventId));
       }
 
       this.lastSyncedAt = new Date().toISOString();
@@ -275,7 +275,7 @@ export class SyncWorker {
       console.warn('[SyncWorker] Sync failure:', error?.message || error);
       if (batch) {
         await IndexedDbStorageService.markSyncFailed(
-          batch.events.map(e => e.eventId),
+          batch.events.map((e: any) => e.eventId),
           error?.message || 'Network failure'
         );
       }

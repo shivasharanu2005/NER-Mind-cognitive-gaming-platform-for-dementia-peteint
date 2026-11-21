@@ -715,9 +715,9 @@ export class LocalCaregiverService {
   ): CaregiverAlertItem[] {
     const alerts: CaregiverAlertItem[] = [];
 
-    for (const [domainName, domainData] of Object.entries(profile.domains)) {
+    for (const [domainName, domainData] of Object.entries(profile.domains) as [string, { trend?: string; observationCount?: number }][]) {
       // Check for declining trend across multiple observations
-      if (domainData.trend === 'declining' && domainData.observationCount >= 2) {
+      if (domainData.trend === 'declining' && (domainData.observationCount ?? 0) >= 2) {
         const alertId = `alert_${patientId}_${domainName}`;
         const existing = this.localAlertsStore.get(alertId);
 
@@ -727,7 +727,7 @@ export class LocalCaregiverService {
             patientId,
             domain: domainName.toUpperCase(),
             severity: 'WARNING',
-            message: `Repeated decline observed in ${domainName} task performance over ${domainData.observationCount} sessions. Caregiver / health-worker review recommended.`,
+            message: `Repeated decline observed in ${domainName} task performance over ${domainData.observationCount ?? 2} sessions. Caregiver / health-worker review recommended.`,
             status: 'PENDING_REVIEW',
             detectedAt: observations[observations.length - 1]?.timestamp || new Date().toISOString(),
           }

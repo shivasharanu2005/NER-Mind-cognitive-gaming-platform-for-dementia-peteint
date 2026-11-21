@@ -70,7 +70,8 @@ export const RightDashboard: React.FC<RightDashboardProps> = ({
       const obs = OfflineStorageService.getObservations();
       const count = obs.length > 0 ? obs.length : 18;
       const cog = calculateCognitiveProfile(profile.patientId, obs);
-      const scores = Object.values(cog.domains).map(d => d.currentScore).filter(Boolean);
+      const domainEntries = Object.values(cog.domains) as Array<{ currentScore?: number }>;
+      const scores = domainEntries.map((d) => d.currentScore).filter((s): s is number => typeof s === 'number');
       const avg = scores.length > 0
         ? Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 100)
         : 86;

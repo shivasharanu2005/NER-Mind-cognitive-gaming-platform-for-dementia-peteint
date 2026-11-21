@@ -9,6 +9,7 @@
   "scripts": {
     "test": "npm run test --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
+    "build:patient": "npm run --workspace=@ner-mind/core build && npm run --workspace=@ner-mind/patient-app build",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "build:android": "npm run build:android --workspace=@ner-mind/patient-app",

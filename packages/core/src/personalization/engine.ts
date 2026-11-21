@@ -2,7 +2,6 @@ import { CognitiveObservation, CognitiveDomain } from '../types/observation.js';
 import { TransferEvaluation, assertNonDiagnosticCopy } from '../transfer/engine.js';
 import {
   PersonalCognitiveModel,
-  DomainBelief,
   LatencyProfile,
   TaskCandidate,
   PersonalizedTaskSelection,

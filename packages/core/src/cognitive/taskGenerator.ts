@@ -1,12 +1,12 @@
 import { CognitiveDomain, TaskContext } from '../types/observation.js';
 import { PRNG } from './prng.js';
 import { TaskComplexityProfile, calculateDomainComplexity, TaskComplexityProfileSchema } from './complexity.js';
-import { REGIONAL_MEMORY_ITEMS, RegionalMemoryItem } from './templates/memoryItems.js';
-import { REGIONAL_ATTENTION_MOTIFS, AttentionMotif } from './templates/attentionMotifs.js';
-import { SEQUENCING_ROUTINE_TEMPLATES, RoutineStep, generateParameterizedRoutine } from './templates/sequencingRoutines.js';
-import { REGIONAL_RECOGNITION_OBJECTS, RegionalRecognitionObject } from './templates/recognitionObjects.js';
-import { MARKET_GOODS, MarketGood } from './templates/calculationScenarios.js';
-import { PlanningScheduleTemplate, PlanActivity, generateProceduralSchedule } from './templates/planningSchedules.js';
+import { REGIONAL_MEMORY_ITEMS } from './templates/memoryItems.js';
+import { REGIONAL_ATTENTION_MOTIFS } from './templates/attentionMotifs.js';
+import { RoutineStep, generateParameterizedRoutine } from './templates/sequencingRoutines.js';
+import { REGIONAL_RECOGNITION_OBJECTS } from './templates/recognitionObjects.js';
+import { MARKET_GOODS } from './templates/calculationScenarios.js';
+import { generateProceduralSchedule } from './templates/planningSchedules.js';
 import { SupportedLanguage } from '../types/language.js';
 import {
   LOCALIZED_RECOGNITION_OBJECTS,

@@ -132,7 +132,7 @@ export const PersonalMemoryView: React.FC<Props> = ({ onBack }) => {
           These familiar North Eastern items are used to personalize your memory and recognition games:
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {profile.familiarObjects.map(obj => (
+          {profile.familiarObjects.map((obj: any) => (
             <div
               key={obj.id}
               style={{
@@ -159,7 +159,7 @@ export const PersonalMemoryView: React.FC<Props> = ({ onBack }) => {
         <h3 style={{ fontSize: 24, marginBottom: 12 }}>
           Approved Family & Caregiver Contacts
         </h3>
-        {profile.familyContacts.map(cnt => (
+        {profile.familyContacts.map((cnt: any) => (
           <div
             key={cnt.id}
             style={{
