@@ -118,3 +118,5 @@ adb install -r packages/patient-app/android/app/build/outputs/apk/debug/app-debu
 10. **Real-Life Daily Care Timeline & Smart Reminders** (Medication safety, water drinking, daily activities)
 11. **Caretaker Management Portal** (Upload custom family photos, configure difficulty, monitor cognitive resilience index)
 
+cd C:\Users\DELL\Desktop\ner-mind-offline-ai-main
+npm run --workspace=@ner-mind/patient-app dev -- --host 0.0.0.0

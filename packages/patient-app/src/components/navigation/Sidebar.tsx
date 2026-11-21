@@ -61,6 +61,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: <HomeIcon size={22} />,
     },
     {
+      id: 'call',
+      tabKey: 'call',
+      label: 'Family & Care Calls',
+      badge: 'Live',
+      badgeColor: '#ECFDF5',
+      icon: <span style={{ fontSize: 20 }}>📞</span>,
+    },
+    {
       id: 'games',
       tabKey: 'games',
       label: t('nav.games') || 'Games',

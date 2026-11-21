@@ -43,6 +43,18 @@ import {
   SupportedAppLanguage,
 } from './services/LocalizationService.js';
 import { LocalizationProvider, useLocalization } from './localization/index.js';
+import { AppModeProvider, useAppMode } from './context/AppModeContext.js';
+import { AndroidMobileHeader } from './components/android/AndroidMobileHeader.js';
+import { AndroidHomeFeed } from './components/android/AndroidHomeFeed.js';
+import { ActivityAlarmService, ActivityAlarmEvent } from './services/ActivityAlarmService.js';
+import { ActivityNoticeModal } from './components/modals/ActivityNoticeModal.js';
+import { CaretakerSetupModal } from './components/modals/CaretakerSetupModal.js';
+import { EmergencyAlertService } from './services/EmergencyAlertService.js';
+import { CallingService } from './calling/callingService.js';
+import { ActiveCallState, CallSignal } from '@ner-mind/core';
+import { PatientCallingView } from './components/calling/PatientCallingView.js';
+import { ActiveCallModal } from './components/calling/ActiveCallModal.js';
+import { IncomingCallModal } from './components/calling/IncomingCallModal.js';
 import { App as CapApp } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { ScreenOrientation } from '@capacitor/screen-orientation';
@@ -60,6 +72,17 @@ type ViewMode = 'patient' | 'caregiver' | 'healthcare';
 
 const PatientAppInner: React.FC = () => {
   const { language } = useLocalization();
+  const { isAndroid, isWebsite } = useAppMode();
+  const [activePatientId, setActivePatientId] = useState<string>(() => OfflineStorageService.getActivePatientId());
+  const [activeAlarm, setActiveAlarm] = useState<ActivityAlarmEvent | null>(null);
+  const [activeCall, setActiveCall] = useState<ActiveCallState | null>(null);
+  const [incomingSignal, setIncomingSignal] = useState<CallSignal | null>(null);
+  const [showCaretakerSetupModal, setShowCaretakerSetupModal] = useState<boolean>(() => {
+    if (typeof localStorage !== 'undefined') {
+      return !localStorage.getItem('ner_mind_caretaker_onboarding_completed');
+    }
+    return false;
+  });
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     if (typeof window !== 'undefined') {
       if (window.location.pathname.startsWith('/caregiver')) return 'caregiver';
@@ -67,6 +90,38 @@ const PatientAppInner: React.FC = () => {
     }
     return 'patient';
   });
+
+  const handlePatientSwitched = async (newId: string) => {
+    await OfflineStorageService.setActivePatientId(newId);
+    setActivePatientId(newId);
+    refreshProfile();
+  };
+
+  const handleProfileCreated = async (newPatientId: string) => {
+    localStorage.setItem('ner_mind_caretaker_onboarding_completed', 'true');
+    setShowCaretakerSetupModal(false);
+    await handlePatientSwitched(newPatientId);
+  };
+
+  const handleExploreDemo = () => {
+    localStorage.setItem('ner_mind_caretaker_onboarding_completed', 'true');
+    setShowCaretakerSetupModal(false);
+  };
+
+  const handleTestAlarm = () => {
+    const currentPatient = OfflineStorageService.getPatientProfile();
+    ActivityAlarmService.triggerDemoAlarm(currentPatient.displayName);
+  };
+
+  const handleTriggerEmergency = () => {
+    const currentPatient = OfflineStorageService.getPatientProfile();
+    EmergencyAlertService.triggerEmergencyAlert({
+      patientId: currentPatient.patientId,
+      patientName: currentPatient.displayName,
+      reason: 'Patient pressed the red SOS button from the main header.',
+    });
+    setShowSafetyModal(true);
+  };
 
   const [isInitializing, setIsInitializing] = useState<boolean>(true);
   const [showSplash, setShowSplash] = useState<boolean>(() => {
@@ -223,7 +278,13 @@ const PatientAppInner: React.FC = () => {
     const setupBackButton = async () => {
       try {
         backListener = await CapApp.addListener('backButton', () => {
+          // Priority 0: Active Call or Incoming Call
+          if (activeCall) { CallingService.endCall(); return; }
+          if (incomingSignal) { CallingService.declineCall(); return; }
+
           // Priority 1: Modals & Drawers
+          if (activeAlarm) { setActiveAlarm(null); return; }
+          if (showCaretakerSetupModal) { setShowCaretakerSetupModal(false); return; }
           if (showVoiceModal) { setShowVoiceModal(false); return; }
           if (showSettingsModal) { setShowSettingsModal(false); return; }
           if (showHelpModal) { setShowHelpModal(false); return; }
@@ -258,6 +319,10 @@ const PatientAppInner: React.FC = () => {
       }
     };
   }, [
+    activeCall,
+    incomingSignal,
+    activeAlarm,
+    showCaretakerSetupModal,
     showVoiceModal,
     showSettingsModal,
     showHelpModal,
@@ -270,6 +335,36 @@ const PatientAppInner: React.FC = () => {
     viewMode,
     patientTab,
   ]);
+
+  // Real-Time Calling Engine & Signaling Bus Subscription
+  useEffect(() => {
+    CallingService.init();
+    const unsubCall = CallingService.subscribeToCall((state) => {
+      setActiveCall(state);
+    });
+    const unsubIncoming = CallingService.subscribeToIncoming((sig) => {
+      setIncomingSignal(sig);
+    });
+
+    return () => {
+      unsubCall();
+      unsubIncoming();
+    };
+  }, []);
+
+  // Real-Time Daily Activity & Health Reminder Alarm Watcher
+  useEffect(() => {
+    const currentPatient = OfflineStorageService.getPatientProfile();
+    ActivityAlarmService.startAlarmWatcher(currentPatient.patientId, currentPatient.displayName);
+    const unsubscribeAlarm = ActivityAlarmService.subscribe((alarm) => {
+      setActiveAlarm(alarm);
+    });
+
+    return () => {
+      ActivityAlarmService.stopAlarmWatcher();
+      unsubscribeAlarm();
+    };
+  }, [activePatientId]);
 
   // Native Android Device Styling (Status Bar & Portrait Lock)
   useEffect(() => {
@@ -381,19 +476,20 @@ const PatientAppInner: React.FC = () => {
   const patient = OfflineStorageService.getPatientProfile();
   const isPlayingGame = Boolean(activeStandaloneGame || activeSessionDomain || showFullTransferProtocol);
 
-  // PATIENT COMPANION EXPERIENCE
+  // PATIENT COMPANION EXPERIENCE (TAILORED FOR ANDROID APP & WEBSITE)
   return (
     <div
+      className={isAndroid ? 'android-app-viewport' : 'website-desktop-viewport'}
       style={{
         minHeight: '100vh',
-        backgroundColor: '#F8FAFC',
+        backgroundColor: isAndroid ? '#0F172A' : '#F8FAFC',
         display: 'flex',
-        flexDirection: 'row',
+        flexDirection: isWebsite ? 'row' : 'column',
         position: 'relative',
       }}
     >
-      {/* 1. Modern Sidebar Navigation (Concealed during full screen gameplay for calm focus) */}
-      {!isPlayingGame && (
+      {/* 1. Desktop Website Sidebar (Concealed in Android Mode & during focused gameplay) */}
+      {isWebsite && !isPlayingGame && (
         <Sidebar
           activeTab={patientTab}
           onSelectTab={(tab) => {
@@ -418,28 +514,49 @@ const PatientAppInner: React.FC = () => {
           flexDirection: 'column',
           minWidth: 0,
           minHeight: '100vh',
+          backgroundColor: isAndroid ? '#F8FAFC' : 'transparent',
         }}
       >
-        {/* 2. Top Header Section (Concealed during focused gameplay) */}
+        {/* 2. Top Header Section: Tailored Android Mobile App Bar vs Desktop Header */}
         {!isPlayingGame && (
-          <DashboardHeader
-            patientName={patient.displayName}
-            onToggleSidebarMobile={() => setIsSidebarMobileOpen(true)}
-            onOpenCaregiver={() => setViewMode('caregiver')}
-            onLogout={() => setShowLogoutModal(true)}
-            isOnline={isOnline}
-            pendingSyncCount={pendingSyncCount}
-            onManualSync={handleManualSync}
-            isSyncing={syncStatus?.state === 'SYNCING'}
-          />
+          isAndroid ? (
+            <AndroidMobileHeader
+              patientName={patient.displayName}
+              patientId={patient.patientId}
+              onOpenCaregiver={() => setViewMode('caregiver')}
+              onOpenSettings={() => setShowSettingsModal(true)}
+              onTriggerEmergency={handleTriggerEmergency}
+              onPatientSwitched={handlePatientSwitched}
+              onOpenCreateProfile={() => setShowCaretakerSetupModal(true)}
+              onTestAlarm={handleTestAlarm}
+              isOnline={isOnline}
+            />
+          ) : (
+            <DashboardHeader
+              patientName={patient.displayName}
+              patientId={patient.patientId}
+              onToggleSidebarMobile={() => setIsSidebarMobileOpen(true)}
+              onOpenCaregiver={() => setViewMode('caregiver')}
+              onLogout={() => setShowLogoutModal(true)}
+              onOpenCreateProfile={() => setShowCaretakerSetupModal(true)}
+              onTestAlarm={handleTestAlarm}
+              onPatientSwitched={handlePatientSwitched}
+              isOnline={isOnline}
+              pendingSyncCount={pendingSyncCount}
+              onManualSync={handleManualSync}
+              isSyncing={syncStatus?.state === 'SYNCING'}
+            />
+          )
         )}
 
         {/* 3. Main Patient Application Content */}
         <main
           style={{
             flex: 1,
-            padding: isPlayingGame ? '24px 20px' : '28px 32px',
-            maxWidth: isPlayingGame ? 900 : 1440,
+            padding: isPlayingGame
+              ? (isAndroid ? '16px 14px 90px 14px' : '24px 20px')
+              : (isAndroid ? '0 0 85px 0' : '28px 32px'),
+            maxWidth: isPlayingGame ? 900 : (isAndroid ? '100%' : 1440),
             margin: '0 auto',
             width: '100%',
           }}
@@ -622,20 +739,32 @@ const PatientAppInner: React.FC = () => {
                 </div>
               )}
 
-              {/* TAB ROUTING */}
+              {/* TAB ROUTING: DEDICATED ANDROID MOBILE FEED VS WEBSITE DESKTOP DASHBOARD */}
               {patientTab === 'home' && (
-                <PatientHomeDashboard
-                  patientName={patient.displayName}
-                  onNavigateTab={(t) => setPatientTab(t)}
-                  onStartGame={(d) => handleStartSession(d)}
-                  recommendation={recommendation}
-                  personalizedTask={personalizedTask}
-                  onOpenVoiceSetup={() => setShowVoiceModal(true)}
-                  currentLanguage={(patient.preferredLanguage as any) || 'en'}
-                  onSelectActivity={(activity) => setActiveStandaloneGame(activity)}
-                  onStartMission={() => setPatientTab('transfer')}
-                  onOpenSafetySimulator={() => setShowSafetyModal(true)}
-                />
+                isAndroid ? (
+                  <AndroidHomeFeed
+                    patientName={patient.displayName}
+                    patientId={patient.patientId}
+                    onNavigateTab={(t) => setPatientTab(t)}
+                    onStartGame={(d) => handleStartSession(d)}
+                    onSelectActivity={(activity) => setActiveStandaloneGame(activity)}
+                    onStartMission={() => setPatientTab('transfer')}
+                    onOpenSafetySimulator={() => setShowSafetyModal(true)}
+                  />
+                ) : (
+                  <PatientHomeDashboard
+                    patientName={patient.displayName}
+                    onNavigateTab={(t) => setPatientTab(t)}
+                    onStartGame={(d) => handleStartSession(d)}
+                    recommendation={recommendation}
+                    personalizedTask={personalizedTask}
+                    onOpenVoiceSetup={() => setShowVoiceModal(true)}
+                    currentLanguage={(patient.preferredLanguage as any) || 'en'}
+                    onSelectActivity={(activity) => setActiveStandaloneGame(activity)}
+                    onStartMission={() => setPatientTab('transfer')}
+                    onOpenSafetySimulator={() => setShowSafetyModal(true)}
+                  />
+                )
               )}
 
               {patientTab === 'games' && (
@@ -659,6 +788,10 @@ const PatientAppInner: React.FC = () => {
                 <RemindersView onBack={() => setPatientTab('home')} />
               )}
 
+              {patientTab === 'call' && (
+                <PatientCallingView onBack={() => setPatientTab('home')} />
+              )}
+
               {patientTab === 'progress' && (
                 <PatientProgressView onBack={() => setPatientTab('home')} />
               )}
@@ -677,9 +810,9 @@ const PatientAppInner: React.FC = () => {
           )}
         </main>
 
-        {/* Mobile Bottom Navigation Bar (convenience on small screens) */}
-        {!isPlayingGame && (
-          <div className="mobile-bottom-nav-wrapper">
+        {/* Bottom Navigation Bar: Fixed on Android Mobile App, responsive on mobile screens */}
+        {!isPlayingGame && (isAndroid || isSidebarMobileOpen === false) && (
+          <div className="mobile-bottom-nav-wrapper" style={{ display: isAndroid ? 'block' : undefined }}>
             <BottomNav activeTab={patientTab} onTabChange={(t) => setPatientTab(t)} />
           </div>
         )}
@@ -709,7 +842,7 @@ const PatientAppInner: React.FC = () => {
       <HelpSupportModal
         isOpen={showHelpModal}
         onClose={() => setShowHelpModal(false)}
-        onTriggerEmergency={() => setShowSafetyModal(true)}
+        onTriggerEmergency={handleTriggerEmergency}
       />
 
       {/* Logout Confirmation Modal */}
@@ -726,6 +859,31 @@ const PatientAppInner: React.FC = () => {
         onClose={() => setShowSafetyModal(false)}
         patientName={patient.displayName}
       />
+
+      {/* Real-Time Activity & Health Reminder Alert Notice Modal */}
+      {activeAlarm && (
+        <ActivityNoticeModal
+          alarm={activeAlarm}
+          onClose={() => setActiveAlarm(null)}
+        />
+      )}
+
+      {/* Real-Time Active Audio/Video Call View */}
+      {activeCall && <ActiveCallModal activeCall={activeCall} />}
+
+      {/* Real-Time Incoming Call Alert Modal */}
+      {incomingSignal && !activeCall && <IncomingCallModal incomingSignal={incomingSignal} />}
+
+      {/* Caretaker Onboarding & Patient Profile Creation Modal */}
+      {showCaretakerSetupModal && (
+        <CaretakerSetupModal
+          isOpen={showCaretakerSetupModal}
+          isInitialOnboarding={typeof localStorage !== 'undefined' ? !localStorage.getItem('ner_mind_caretaker_onboarding_completed') : false}
+          onProfileCreated={handleProfileCreated}
+          onExploreDemo={handleExploreDemo}
+          onClose={() => setShowCaretakerSetupModal(false)}
+        />
+      )}
 
       <style>{`
         .mobile-bottom-nav-wrapper {
@@ -744,9 +902,11 @@ const PatientAppInner: React.FC = () => {
 export const App: React.FC = () => {
   return (
     <ErrorBoundary>
-      <LocalizationProvider>
-        <PatientAppInner />
-      </LocalizationProvider>
+      <AppModeProvider>
+        <LocalizationProvider>
+          <PatientAppInner />
+        </LocalizationProvider>
+      </AppModeProvider>
     </ErrorBoundary>
   );
 };

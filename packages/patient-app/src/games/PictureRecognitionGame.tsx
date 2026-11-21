@@ -1,7 +1,65 @@
 
 import { useEffect, useState } from "react";
+import { GameLevelManager, TOTAL_GAME_LEVELS } from "../services/GameLevelManager.js";
+import { GameLevelHeader } from "../components/common/GameLevelHeader.js";
 
-type Category = "Fruits" | "Animals" | "Household" | "Regional";
+type Category = "Fruits" | "Animals" | "Household" | "Regional" | "Nature";
+
+type PictureItem = {
+  id: number;
+  category: Category;
+  prompt: string;
+  emoji: string;
+  answer: string;
+};
+
+const PICTURE_ITEMS: PictureItem[] = [
+  // Fruits
+  { id: 1, category: "Fruits", prompt: "Find the apple", emoji: "🍎", answer: "apple" },
+  { id: 2, category: "Fruits", prompt: "Find the banana", emoji: "🍌", answer: "banana" },
+  { id: 3, category: "Fruits", prompt: "Which fruit is a sweet mango?", emoji: "🥭", answer: "mango" },
+  { id: 4, category: "Fruits", prompt: "Find the juicy orange", emoji: "🍊", answer: "orange" },
+  { id: 5, category: "Fruits", prompt: "Find the bunch of grapes", emoji: "🍇", answer: "grapes" },
+  { id: 6, category: "Fruits", prompt: "Find the watermelon", emoji: "🍉", answer: "watermelon" },
+  { id: 7, category: "Fruits", prompt: "Find the sweet pineapple", emoji: "🍍", answer: "pineapple" },
+  { id: 8, category: "Fruits", prompt: "Find the brown coconut", emoji: "🥥", answer: "coconut" },
+
+  // Animals
+  { id: 9, category: "Animals", prompt: "Find the friendly cat", emoji: "🐱", answer: "cat" },
+  { id: 10, category: "Animals", prompt: "Find the playful dog", emoji: "🐶", answer: "dog" },
+  { id: 11, category: "Animals", prompt: "Which animal gives fresh milk?", emoji: "🐄", answer: "cow" },
+  { id: 12, category: "Animals", prompt: "Find the singing bird", emoji: "🐦", answer: "bird" },
+  { id: 13, category: "Animals", prompt: "Find the swimming fish", emoji: "🐟", answer: "fish" },
+  { id: 14, category: "Animals", prompt: "Find the mighty elephant", emoji: "🐘", answer: "elephant" },
+  { id: 15, category: "Animals", prompt: "Find the gentle butterfly", emoji: "🦋", answer: "butterfly" },
+  { id: 16, category: "Animals", prompt: "Find the duck", emoji: "🦆", answer: "duck" },
+
+  // Household
+  { id: 17, category: "Household", prompt: "Find the chair to sit on", emoji: "🪑", answer: "chair" },
+  { id: 18, category: "Household", prompt: "Find the wall clock showing time", emoji: "🕒", answer: "clock" },
+  { id: 19, category: "Household", prompt: "Find the warm tea cup", emoji: "☕", answer: "tea cup" },
+  { id: 20, category: "Household", prompt: "Find the door key", emoji: "🔑", answer: "key" },
+  { id: 21, category: "Household", prompt: "Find the reading book", emoji: "📘", answer: "book" },
+  { id: 22, category: "Household", prompt: "Find the reading spectacles", emoji: "👓", answer: "glasses" },
+  { id: 23, category: "Household", prompt: "Find the rain umbrella", emoji: "☂️", answer: "umbrella" },
+  { id: 24, category: "Household", prompt: "Find the clean water glass", emoji: "🥛", answer: "water glass" },
+
+  // Regional (North East traditions & nature)
+  { id: 25, category: "Regional", prompt: "Find the traditional Assam tea pot", emoji: "🫖", answer: "tea pot" },
+  { id: 26, category: "Regional", prompt: "Find the bowl of warm rice", emoji: "🍚", answer: "rice bowl" },
+  { id: 27, category: "Regional", prompt: "Find the beautiful pink lotus flower", emoji: "🪷", answer: "lotus flower" },
+  { id: 28, category: "Regional", prompt: "Find the fresh green banana leaf", emoji: "🌿", answer: "banana leaf" },
+  { id: 29, category: "Regional", prompt: "Find the melody bamboo flute", emoji: "🎋", answer: "bamboo flute" },
+  { id: 30, category: "Regional", prompt: "Find the traditional earthen diya lamp", emoji: "🪔", answer: "diya lamp" },
+  { id: 31, category: "Regional", prompt: "Find the river boat", emoji: "🛶", answer: "river boat" },
+
+  // Nature
+  { id: 32, category: "Nature", prompt: "Find the green shady tree", emoji: "🌳", answer: "tree" },
+  { id: 33, category: "Nature", prompt: "Find the warm shining sun", emoji: "☀️", answer: "bright sun" },
+  { id: 34, category: "Nature", prompt: "Find the cool rain cloud", emoji: "🌧️", answer: "rain cloud" },
+  { id: 35, category: "Nature", prompt: "Find the twinkling night star", emoji: "⭐", answer: "star" },
+  { id: 36, category: "Nature", prompt: "Find the morning blooming flower", emoji: "🌺", answer: "flower" },
+];
 
 type Question = {
   id: number;
@@ -11,171 +69,6 @@ type Question = {
   answer: string;
   options: string[];
 };
-
-const QUESTION_BANK: Question[] = [
-  {
-    id: 1,
-    category: "Fruits",
-    prompt: "Find the apple",
-    emoji: "🍎",
-    answer: "apple",
-    options: ["orange", "banana", "apple"],
-  },
-  {
-    id: 2,
-    category: "Fruits",
-    prompt: "Find the banana",
-    emoji: "🍌",
-    answer: "banana",
-    options: ["mango", "banana", "grapes"],
-  },
-  {
-    id: 3,
-    category: "Fruits",
-    prompt: "Which fruit is a mango?",
-    emoji: "🥭",
-    answer: "mango",
-    options: ["mango", "apple", "watermelon"],
-  },
-  {
-    id: 4,
-    category: "Fruits",
-    prompt: "Find the orange",
-    emoji: "🍊",
-    answer: "orange",
-    options: ["coconut", "orange", "pear"],
-  },
-  {
-    id: 5,
-    category: "Fruits",
-    prompt: "Find the grapes",
-    emoji: "🍇",
-    answer: "grapes",
-    options: ["lemon", "papaya", "grapes"],
-  },
-  {
-    id: 6,
-    category: "Animals",
-    prompt: "Find the cat",
-    emoji: "🐱",
-    answer: "cat",
-    options: ["dog", "cat", "cow"],
-  },
-  {
-    id: 7,
-    category: "Animals",
-    prompt: "Find the dog",
-    emoji: "🐶",
-    answer: "dog",
-    options: ["goat", "dog", "horse"],
-  },
-  {
-    id: 8,
-    category: "Animals",
-    prompt: "Which animal gives us milk?",
-    emoji: "🐄",
-    answer: "cow",
-    options: ["lion", "monkey", "cow"],
-  },
-  {
-    id: 9,
-    category: "Animals",
-    prompt: "Find the bird",
-    emoji: "🐦",
-    answer: "bird",
-    options: ["fish", "bird", "rabbit"],
-  },
-  {
-    id: 10,
-    category: "Animals",
-    prompt: "Find the fish",
-    emoji: "🐟",
-    answer: "fish",
-    options: ["fish", "elephant", "cat"],
-  },
-  {
-    id: 11,
-    category: "Household",
-    prompt: "Find the chair",
-    emoji: "🪑",
-    answer: "chair",
-    options: ["table", "chair", "bed"],
-  },
-  {
-    id: 12,
-    category: "Household",
-    prompt: "Find the clock",
-    emoji: "🕒",
-    answer: "clock",
-    options: ["cup", "plate", "clock"],
-  },
-  {
-    id: 13,
-    category: "Household",
-    prompt: "Find the cup",
-    emoji: "☕",
-    answer: "cup",
-    options: ["cup", "shoe", "book"],
-  },
-  {
-    id: 14,
-    category: "Household",
-    prompt: "Find the key",
-    emoji: "🔑",
-    answer: "key",
-    options: ["spoon", "key", "phone"],
-  },
-  {
-    id: 15,
-    category: "Household",
-    prompt: "Find the book",
-    emoji: "📘",
-    answer: "book",
-    options: ["bottle", "book", "chair"],
-  },
-  {
-    id: 16,
-    category: "Regional",
-    prompt: "Find the coconut",
-    emoji: "🥥",
-    answer: "coconut",
-    options: ["coconut", "apple", "carrot"],
-  },
-  {
-    id: 17,
-    category: "Regional",
-    prompt: "Find the rice",
-    emoji: "🍚",
-    answer: "rice",
-    options: ["bread", "rice", "cake"],
-  },
-  {
-    id: 18,
-    category: "Regional",
-    prompt: "Find the mango",
-    emoji: "🥭",
-    answer: "mango",
-    options: ["potato", "onion", "mango"],
-  },
-  {
-    id: 19,
-    category: "Regional",
-    prompt: "Find the flower",
-    emoji: "🌺",
-    answer: "flower",
-    options: ["leaf", "flower", "tree"],
-  },
-  {
-    id: 20,
-    category: "Regional",
-    prompt: "Find the banana leaf",
-    emoji: "🌿",
-    answer: "banana leaf",
-    options: ["banana leaf", "flower", "fruit"],
-  },
-];
-
-type Difficulty = "Easy" | "Medium" | "Advanced";
 
 const STORAGE_KEY = "picture-recognition-game-progress";
 
@@ -190,8 +83,42 @@ function shuffle<T,>(items: T[]): T[] {
   return result;
 }
 
+function generateLevelQuestions(level: number, category: Category | "All"): Question[] {
+  // Option count scales from 2 to 6 across the 30 levels
+  let optionCount = 2;
+  if (level <= 6) optionCount = 2;       // Tier 1: 2 choices
+  else if (level <= 12) optionCount = 3;  // Tier 2: 3 choices
+  else if (level <= 18) optionCount = 4;  // Tier 3: 4 choices
+  else if (level <= 24) optionCount = 5;  // Tier 4: 5 choices
+  else optionCount = 6;                  // Tier 5: 6 choices
+
+  const pool = category === "All"
+    ? PICTURE_ITEMS
+    : PICTURE_ITEMS.filter((item) => item.category === category);
+
+  const effectivePool = pool.length >= 3 ? pool : PICTURE_ITEMS;
+  const chosen = shuffle(effectivePool).slice(0, 3);
+
+  return chosen.map((target) => {
+    const distractors = shuffle(PICTURE_ITEMS.filter((p) => p.answer !== target.answer))
+      .slice(0, optionCount - 1)
+      .map((p) => p.answer);
+
+    const options = shuffle([target.answer, ...distractors]);
+
+    return {
+      id: target.id,
+      category: target.category,
+      prompt: target.prompt,
+      emoji: target.emoji,
+      answer: target.answer,
+      options,
+    };
+  });
+}
+
 export default function PictureRecognitionGame({ onExit }: { onExit?: () => void } = {}) {
-  const [difficulty, setDifficulty] = useState<Difficulty>("Easy");
+  const [currentLevel, setCurrentLevel] = useState(1);
   const [category, setCategory] = useState<Category | "All">("All");
   const [questions, setQuestions] = useState<Question[]>([]);
   const [questionIndex, setQuestionIndex] = useState(0);
@@ -224,7 +151,8 @@ export default function PictureRecognitionGame({ onExit }: { onExit?: () => void
       // Game works even when local storage is unavailable.
     }
 
-    startGame("Easy", "All");
+    const savedLvl = GameLevelManager.getGameLevel('pictureRecognition');
+    startLevel(savedLvl, "All");
     // Initialize once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -255,30 +183,13 @@ export default function PictureRecognitionGame({ onExit }: { onExit?: () => void
     }
   }
 
-  function startGame(
-    nextDifficulty: Difficulty = difficulty,
-    nextCategory: Category | "All" = category
-  ) {
-    const pool =
-      nextCategory === "All"
-        ? QUESTION_BANK
-        : QUESTION_BANK.filter((q) => q.category === nextCategory);
+  function startLevel(lvl = currentLevel, cat: Category | "All" = category) {
+    const safeLvl = Math.max(1, Math.min(TOTAL_GAME_LEVELS, lvl));
+    const nextQuestions = generateLevelQuestions(safeLvl, cat);
 
-    const count = Math.min(
-      nextDifficulty === "Easy" ? 5 :
-      nextDifficulty === "Medium" ? 8 : 10,
-      pool.length
-    );
-
-    const nextQuestions = shuffle(pool)
-      .slice(0, count)
-      .map((question) => ({
-        ...question,
-        options: shuffle(question.options),
-      }));
-
-    setDifficulty(nextDifficulty);
-    setCategory(nextCategory);
+    setCurrentLevel(safeLvl);
+    GameLevelManager.saveGameLevel('pictureRecognition', safeLvl);
+    setCategory(cat);
     setQuestions(nextQuestions);
     setQuestionIndex(0);
     setScore(0);
@@ -286,6 +197,8 @@ export default function PictureRecognitionGame({ onExit }: { onExit?: () => void
     setAnswered(false);
     setShowHint(false);
     setGameFinished(false);
+
+    speak(`Level ${safeLvl}. Look at the picture and choose the matching word.`);
   }
 
   function chooseAnswer(option: string) {
@@ -317,6 +230,8 @@ export default function PictureRecognitionGame({ onExit }: { onExit?: () => void
       (selectedAnswer === currentQuestion?.answer ? 1 : 0);
 
     setGameFinished(true);
+    const accuracy = Math.round((finalScore / (questions.length || 1)) * 100);
+    GameLevelManager.completeLevel('pictureRecognition', currentLevel, accuracy);
 
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -340,7 +255,7 @@ export default function PictureRecognitionGame({ onExit }: { onExit?: () => void
     }
 
     speak(
-      `You finished the game. Your score is ${finalScore} out of ${questions.length}. Well done.`
+      `Level ${currentLevel} completed. Your score is ${finalScore} out of ${questions.length}. Splendid work!`
     );
   }
 
@@ -656,6 +571,15 @@ export default function PictureRecognitionGame({ onExit }: { onExit?: () => void
         }
       `}</style>
 
+      <div style={{ maxWidth: 860, margin: "0 auto 16px", width: "100%" }}>
+        <GameLevelHeader
+          gameId="pictureRecognition"
+          currentLevel={currentLevel}
+          onSelectLevel={(lvl) => startLevel(lvl, category)}
+          gameTitle="Picture Recognition"
+        />
+      </div>
+
       <main className="pr-panel">
         {!gameFinished && currentQuestion && (
           <>
@@ -670,49 +594,30 @@ export default function PictureRecognitionGame({ onExit }: { onExit?: () => void
 
             <h1 className="pr-heading">Picture Recognition</h1>
             <p className="pr-subtitle">
-              Look at the picture and choose the correct answer.
+              Look at the picture and choose the matching word.
             </p>
 
-            <div className="pr-controls">
+            <div className="pr-controls" style={{ justifyContent: "center", marginBottom: 16 }}>
               <label>
                 <span className="pr-small-note" style={{ display: "block", margin: "0 0 5px" }}>
-                  Category
+                  Filter Objects
                 </span>
                 <select
                   className="pr-control-select"
                   value={category}
                   onChange={(event) =>
-                    startGame(
-                      difficulty,
+                    startLevel(
+                      currentLevel,
                       event.target.value as Category | "All"
                     )
                   }
                 >
-                  <option value="All">All objects</option>
+                  <option value="All">All Categories</option>
                   <option value="Fruits">Fruits</option>
                   <option value="Animals">Animals</option>
                   <option value="Household">Household</option>
-                  <option value="Regional">Regional items</option>
-                </select>
-              </label>
-
-              <label>
-                <span className="pr-small-note" style={{ display: "block", margin: "0 0 5px" }}>
-                  Difficulty
-                </span>
-                <select
-                  className="pr-control-select"
-                  value={difficulty}
-                  onChange={(event) =>
-                    startGame(
-                      event.target.value as Difficulty,
-                      category
-                    )
-                  }
-                >
-                  <option value="Easy">Easy · 5</option>
-                  <option value="Medium">Medium · 8</option>
-                  <option value="Advanced">Advanced · 10</option>
+                  <option value="Regional">Regional & Cultural</option>
+                  <option value="Nature">Nature</option>
                 </select>
               </label>
             </div>
@@ -822,8 +727,8 @@ export default function PictureRecognitionGame({ onExit }: { onExit?: () => void
                 </button>
               )}
 
-              <button onClick={() => startGame(difficulty, category)}>
-                ↻ Restart
+              <button onClick={() => startLevel(currentLevel, category)}>
+                ↻ Restart Level
               </button>
 
               <button
@@ -850,7 +755,7 @@ export default function PictureRecognitionGame({ onExit }: { onExit?: () => void
                   } else if (window.history.length > 1) {
                     window.history.back();
                   } else {
-                    startGame("Easy", "All");
+                    startLevel(1, "All");
                   }
                 }}
                 aria-label="Go back"
@@ -866,8 +771,8 @@ export default function PictureRecognitionGame({ onExit }: { onExit?: () => void
         {gameFinished && (
           <section className="pr-results">
             <div className="pr-result-emoji">🎉</div>
-            <h2>Wonderful Work!</h2>
-            <p>You have completed the picture recognition game.</p>
+            <h2>Level {currentLevel} Complete!</h2>
+            <p>You have successfully completed this round of picture recognition.</p>
 
             <div className="pr-result-score">
               Score: {score} / {questions.length}
@@ -875,19 +780,26 @@ export default function PictureRecognitionGame({ onExit }: { onExit?: () => void
 
             <p>
               {score === questions.length
-                ? "Perfect! You recognised every picture."
-                : "Well done for participating. You can practise again whenever you like."}
+                ? "Perfect! You recognised every picture without a mistake."
+                : "Well done for participating! Keep your mind sharp."}
             </p>
 
             <div className="pr-bottom-actions">
+              {currentLevel < TOTAL_GAME_LEVELS && (
+                <button
+                  className="pr-main-button"
+                  onClick={() => startLevel(currentLevel + 1, category)}
+                >
+                  Next Level (Level {currentLevel + 1}) →
+                </button>
+              )}
               <button
-                className="pr-main-button"
-                onClick={() => startGame(difficulty, category)}
+                onClick={() => startLevel(currentLevel, category)}
               >
-                Play Again
+                Replay Level {currentLevel}
               </button>
-              <button onClick={() => startGame("Easy", "All")}>
-                Start Easy Level
+              <button onClick={() => startLevel(1, "All")}>
+                Start From Level 1
               </button>
             </div>
 

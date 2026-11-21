@@ -79,6 +79,12 @@ export const PersonalMemoryProfileSchema = z.object({
     grantedAt: z.string().datetime(),
     dataRetentionDays: z.number().int().positive().default(365),
   }),
+  caretakerName: z.string().optional(),
+  caretakerPassword: z.string().optional(),
+  dateOfBirth: z.string().optional(),
+  locality: z.string().optional(),
+  mobileNumber: z.string().optional(),
+  emailId: z.string().optional(),
 });
 
 export type PersonalMemoryProfile = z.infer<typeof PersonalMemoryProfileSchema>;

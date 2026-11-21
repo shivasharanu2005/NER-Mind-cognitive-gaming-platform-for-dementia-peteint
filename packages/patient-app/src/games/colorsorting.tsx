@@ -1,5 +1,7 @@
 
 import { useEffect, useState } from "react";
+import { GameLevelManager, TOTAL_GAME_LEVELS } from "../services/GameLevelManager.js";
+import { GameLevelHeader } from "../components/common/GameLevelHeader.js";
 
 type ColorPiece = {
   id: number;
@@ -12,6 +14,9 @@ const COLORS = [
   { name: "Blue", value: "#3978ef" },
   { name: "Yellow", value: "#f5d51b" },
   { name: "Purple", value: "#7845e8" },
+  { name: "Orange", value: "#ea580c" },
+  { name: "Teal", value: "#0d9488" },
+  { name: "Pink", value: "#db2777" },
 ];
 
 const STORAGE_KEY = "dementia-color-sorting-progress";
@@ -22,11 +27,15 @@ type Level = {
   columns: number;
 };
 
-const LEVELS: Level[] = [
-  { label: "Easy", rows: 3, columns: 3 },
-  { label: "Medium", rows: 4, columns: 4 },
-  { label: "Advanced", rows: 4, columns: 5 },
-];
+// 30 Progressive Levels scaling from 2x2 up to 4x4 with multiple color nuances
+const LEVELS: Level[] = Array.from({ length: TOTAL_GAME_LEVELS }, (_, i) => {
+  const lvl = i + 1;
+  if (lvl <= 6) return { label: `Level ${lvl} (Tier 1: 4 Discs)`, rows: 2, columns: 2 };
+  if (lvl <= 12) return { label: `Level ${lvl} (Tier 2: 6 Discs)`, rows: 3, columns: 2 };
+  if (lvl <= 18) return { label: `Level ${lvl} (Tier 3: 9 Discs)`, rows: 3, columns: 3 };
+  if (lvl <= 24) return { label: `Level ${lvl} (Tier 4: 12 Discs)`, rows: 4, columns: 3 };
+  return { label: `Level ${lvl} (Tier 5: 16 Discs)`, rows: 4, columns: 4 };
+});
 
 function shuffle<T,>(items: T[]): T[] {
   const result = [...items];
@@ -94,7 +103,9 @@ export default function ColorSorting() {
       // The game still works if browser storage is unavailable.
     }
 
-    newGame(0);
+    const initialLvl = GameLevelManager.getGameLevel('colorSorting');
+    const initialIdx = Math.max(0, Math.min(LEVELS.length - 1, initialLvl - 1));
+    newGame(initialIdx);
     // Initialise the game once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -103,6 +114,7 @@ export default function ColorSorting() {
     if (!isSolved || completed) return;
 
     setCompleted(true);
+    GameLevelManager.completeLevel('colorSorting', levelIndex + 1, 100);
     setMessage("Wonderful! You matched all the colours. Well done!");
 
     if (voiceEnabled && "speechSynthesis" in window) {
@@ -155,11 +167,13 @@ export default function ColorSorting() {
   }
 
   function newGame(nextLevelIndex = levelIndex) {
-    const chosenLevel = LEVELS[nextLevelIndex];
+    const safeIdx = Math.max(0, Math.min(LEVELS.length - 1, nextLevelIndex));
+    const chosenLevel = LEVELS[safeIdx];
     const count = chosenLevel.rows * chosenLevel.columns;
     const puzzle = createPuzzle(count);
 
-    setLevelIndex(nextLevelIndex);
+    setLevelIndex(safeIdx);
+    GameLevelManager.saveGameLevel('colorSorting', safeIdx + 1);
     setTarget(puzzle.target);
     setBoard(puzzle.randomized);
     setSelected(null);
@@ -616,26 +630,17 @@ export default function ColorSorting() {
           </p>
         </header>
 
-        <section className="cs-card">
-          <div className="cs-toolbar">
-            <div>
-              <div style={{ fontWeight: 700, marginBottom: 9 }}>
-                Choose your level
-              </div>
-              <div className="cs-levels">
-                {LEVELS.map((item, index) => (
-                  <button
-                    key={item.label}
-                    className={levelIndex === index ? "active" : ""}
-                    onClick={() => newGame(index)}
-                    aria-pressed={levelIndex === index}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+        <div style={{ marginBottom: 16 }}>
+          <GameLevelHeader
+            gameId="colorSorting"
+            currentLevel={levelIndex + 1}
+            onSelectLevel={(lvl) => newGame(lvl - 1)}
+            gameTitle="Colour Sorting"
+          />
+        </div>
 
+        <section className="cs-card">
+          <div className="cs-toolbar" style={{ justifyContent: "flex-end", marginBottom: 12 }}>
             <button
               onClick={() => {
                 const enabled = !voiceEnabled;

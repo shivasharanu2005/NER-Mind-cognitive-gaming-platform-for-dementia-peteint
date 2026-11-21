@@ -1,5 +1,7 @@
 
 import { useEffect, useState } from "react";
+import { GameLevelManager, TOTAL_GAME_LEVELS } from "../services/GameLevelManager.js";
+import { GameLevelHeader } from "../components/common/GameLevelHeader.js";
 
 type Shape =
   | "Circle" | "Square" | "Triangle" | "Rectangle"
@@ -11,21 +13,58 @@ type Option = {
   color: string;
 };
 
-const LEVELS: Shape[][] = [
-  ["Circle", "Square", "Triangle"],
-  ["Circle", "Square", "Triangle", "Rectangle"],
-  ["Circle", "Square", "Triangle", "Rectangle", "Oval"],
-  ["Circle", "Square", "Triangle", "Rectangle", "Oval", "Pentagon"],
-  ["Circle", "Square", "Triangle", "Rectangle", "Oval",
-    "Pentagon", "Hexagon", "Diamond", "Star"],
+const ALL_AVAILABLE_SHAPES: Shape[] = [
+  "Circle", "Square", "Triangle", "Rectangle",
+  "Oval", "Pentagon", "Hexagon", "Diamond", "Star"
 ];
+
+// Progressive 30 levels with escalating visual complexity
+function getShapesForLevel(lvl: number): Shape[] {
+  // Tier 1 (Levels 1-6): Gentle start with 2-3 shapes
+  if (lvl === 1) return ["Circle", "Square"];
+  if (lvl === 2) return ["Circle", "Triangle"];
+  if (lvl === 3) return ["Square", "Triangle"];
+  if (lvl === 4) return ["Circle", "Square", "Triangle"];
+  if (lvl === 5) return ["Circle", "Square", "Rectangle"];
+  if (lvl === 6) return ["Square", "Triangle", "Rectangle"];
+
+  // Tier 2 (Levels 7-12): 4 distinct shapes
+  if (lvl === 7) return ["Circle", "Square", "Triangle", "Rectangle"];
+  if (lvl === 8) return ["Circle", "Square", "Triangle", "Oval"];
+  if (lvl === 9) return ["Circle", "Triangle", "Rectangle", "Oval"];
+  if (lvl === 10) return ["Square", "Rectangle", "Oval", "Diamond"];
+  if (lvl === 11) return ["Circle", "Triangle", "Oval", "Diamond"];
+  if (lvl === 12) return ["Triangle", "Rectangle", "Diamond", "Pentagon"];
+
+  // Tier 3 (Levels 13-18): 5 shapes with subtle angles
+  if (lvl === 13) return ["Circle", "Square", "Triangle", "Rectangle", "Oval"];
+  if (lvl === 14) return ["Circle", "Square", "Rectangle", "Oval", "Pentagon"];
+  if (lvl === 15) return ["Square", "Triangle", "Rectangle", "Pentagon", "Hexagon"];
+  if (lvl === 16) return ["Triangle", "Rectangle", "Diamond", "Pentagon", "Hexagon"];
+  if (lvl === 17) return ["Circle", "Oval", "Diamond", "Hexagon", "Star"];
+  if (lvl === 18) return ["Square", "Diamond", "Pentagon", "Hexagon", "Star"];
+
+  // Tier 4 (Levels 19-24): 6-7 shapes with visual density
+  if (lvl === 19) return ["Circle", "Square", "Triangle", "Rectangle", "Oval", "Pentagon"];
+  if (lvl === 20) return ["Square", "Triangle", "Rectangle", "Oval", "Pentagon", "Hexagon"];
+  if (lvl === 21) return ["Circle", "Triangle", "Rectangle", "Pentagon", "Hexagon", "Diamond"];
+  if (lvl === 22) return ["Triangle", "Rectangle", "Oval", "Hexagon", "Diamond", "Star"];
+  if (lvl === 23) return ["Circle", "Square", "Oval", "Pentagon", "Hexagon", "Diamond", "Star"];
+  if (lvl === 24) return ["Square", "Rectangle", "Oval", "Pentagon", "Hexagon", "Diamond", "Star"];
+
+  // Tier 5 (Levels 25-30): 8-9 shapes with high interference (Grand Master challenge)
+  if (lvl === 25) return ["Circle", "Square", "Triangle", "Rectangle", "Oval", "Pentagon", "Hexagon", "Diamond"];
+  if (lvl === 26) return ["Square", "Triangle", "Rectangle", "Oval", "Pentagon", "Hexagon", "Diamond", "Star"];
+  if (lvl === 27) return ["Circle", "Triangle", "Rectangle", "Oval", "Pentagon", "Hexagon", "Diamond", "Star"];
+  if (lvl === 28) return ALL_AVAILABLE_SHAPES;
+  if (lvl === 29) return ALL_AVAILABLE_SHAPES;
+  return ALL_AVAILABLE_SHAPES; // Level 30
+}
 
 const COLORS = [
   "#4389E8", "#F39A56", "#39A985", "#AA83E8",
   "#E66D89", "#E4BB45", "#54B8C4", "#E07845", "#7189CF",
 ];
-
-const STORAGE_KEY = "shape-game-single-file";
 
 function shuffle<T,>(items: T[]): T[] {
   const result = [...items];
@@ -37,7 +76,7 @@ function shuffle<T,>(items: T[]): T[] {
 }
 
 function makePuzzle(level: number) {
-  const shapes = LEVELS[level - 1];
+  const shapes = getShapesForLevel(level);
   const target = shapes[Math.floor(Math.random() * shapes.length)];
 
   const options: Option[] = shuffle(
@@ -244,9 +283,9 @@ const css = `
 `;
 
 export default function ShapeFindingGame() {
-  const [level, setLevel] = useState(1);
+  const [level, setLevel] = useState(() => GameLevelManager.getGameLevel('shapeFinding'));
   const [round, setRound] = useState(1);
-  const [puzzle, setPuzzle] = useState(() => makePuzzle(1));
+  const [puzzle, setPuzzle] = useState(() => makePuzzle(GameLevelManager.getGameLevel('shapeFinding')));
   const [phase, setPhase] = useState<"preview" | "playing" | "result">("preview");
   const [feedback, setFeedback] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -258,28 +297,22 @@ export default function ShapeFindingGame() {
   const [completed, setCompleted] = useState(false);
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const data = JSON.parse(saved);
-        if (Number.isInteger(data.level) && data.level >= 1 && data.level <= 5) {
-          setLevel(data.level);
-          setPuzzle(makePuzzle(data.level));
-          setCorrect(Number.isFinite(data.correct) ? Math.max(0, data.correct) : 0);
-        }
-      }
-    } catch {
-      // Continue without saved progress.
-    }
+    const savedLevel = GameLevelManager.getGameLevel('shapeFinding');
+    setLevel(savedLevel);
+    setPuzzle(makePuzzle(savedLevel));
   }, []);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ level, correct }));
-    } catch {
-      // Browser storage is optional.
-    }
-  }, [level, correct]);
+  function handleSelectLevel(lvl: number) {
+    setLevel(lvl);
+    setRound(1);
+    setPuzzle(makePuzzle(lvl));
+    setPhase("preview");
+    setFeedback("");
+    setSelectedId(null);
+    setShowHint(false);
+    setCompleted(false);
+    GameLevelManager.saveGameLevel('shapeFinding', lvl);
+  }
 
   function announce(text: string) {
     if (voice) speak(text);
@@ -303,16 +336,19 @@ export default function ShapeFindingGame() {
   }
 
   function next() {
-    if (round < 5) {
+    if (round < 3) {
       setRound(value => value + 1);
       setPuzzle(makePuzzle(level));
-    } else if (level < 5) {
-      setLevel(value => value + 1);
+    } else if (level < TOTAL_GAME_LEVELS) {
+      GameLevelManager.completeLevel('shapeFinding', level, 100);
+      const nextLvl = level + 1;
+      setLevel(nextLvl);
       setRound(1);
-      setPuzzle(makePuzzle(level + 1));
+      setPuzzle(makePuzzle(nextLvl));
     } else {
+      GameLevelManager.completeLevel('shapeFinding', TOTAL_GAME_LEVELS, 100);
       setCompleted(true);
-      announce("Congratulations. You completed all five levels.");
+      announce("Congratulations! You mastered all 30 levels of Shape Finding!");
       return;
     }
 
@@ -323,26 +359,12 @@ export default function ShapeFindingGame() {
   }
 
   function restart() {
-    setLevel(1);
-    setRound(1);
-    setPuzzle(makePuzzle(1));
-    setPhase("preview");
-    setFeedback("");
-    setSelectedId(null);
-    setShowHint(false);
+    handleSelectLevel(1);
     setCorrect(0);
     setAttempts(0);
     setHints(0);
     setCompleted(false);
-
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // Continue without storage.
-    }
   }
-
-  const progress = completed ? 100 : ((level - 1) * 5 + round - 1) / 25 * 100;
 
   return (
     <>
@@ -386,28 +408,12 @@ export default function ShapeFindingGame() {
           </section>
         ) : (
           <>
-            <section className="sf-level-card">
-              <div className="sf-level-row">
-                <div>
-                  <p className="sf-eyebrow">YOUR PROGRESS</p>
-                  <h2>Level {level} <span>of 5</span></h2>
-                </div>
-                <div className="sf-round">Round <strong>{round}</strong> of 5</div>
-              </div>
-
-              <div className="sf-progress-track" role="progressbar"
-                aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}>
-                <div className="sf-progress-fill" style={{ width: `${progress}%` }} />
-              </div>
-
-              <p className="sf-level-note">
-                {level === 1 ? "Let's begin with simple shapes." :
-                 level === 2 ? "Great! Let's find some more shapes." :
-                 level === 3 ? "Take your time and look carefully." :
-                 level === 4 ? "Wonderful progress. Keep going at your own pace." :
-                 "Final level! Enjoy the game."}
-              </p>
-            </section>
+            <GameLevelHeader
+              gameId="shapeFinding"
+              currentLevel={level}
+              onSelectLevel={handleSelectLevel}
+              gameTitle="Find the Shape"
+            />
 
             <section className="sf-panel">
               {phase === "preview" && (

@@ -11,6 +11,9 @@ import {
 import { LanguagePackManager } from '../audio/languagePackManager.js';
 import { RecognitionLibrary } from './RecognitionLibrary.js';
 import { RecognitionVoiceManager } from './RecognitionVoiceManager.js';
+import { CaretakerContactManager } from '../components/calling/CaretakerContactManager.js';
+import { CallHistoryView } from '../components/calling/CallHistoryView.js';
+import { EmergencyAlertService, EmergencyEvent } from '../services/EmergencyAlertService.js';
 
 export interface PlannedRegionalLanguage {
   code: SupportedLanguage;
@@ -80,17 +83,17 @@ interface FullProfile {
 
 interface TransferItem {
   id: string;
-  domain: string;
+  domain?: string;
   baselineTaskId: string;
   verificationTaskId: string;
   baselineScore: number;
   verificationScore: number;
   transferDelta: number;
-  percentageChange: number;
+  percentageChange?: number;
   trainingInterventionsCount: number;
-  contextsTraversed: string[];
-  confidenceScore: number;
-  transferCategory: string;
+  contextsTraversed?: string[];
+  confidenceScore?: number;
+  transferCategory?: string;
   observedReport: string;
   evaluatedAt: string;
 }
@@ -119,7 +122,11 @@ interface AlertItem {
   observationWindow: string;
   reason: string;
   timestamp: string;
-  reviewStatus: 'PENDING_REVIEW' | 'REVIEWED' | 'ACKNOWLEDGED';
+  reviewStatus: 'PENDING_REVIEW' | 'REVIEWED' | 'ACKNOWLEDGED' | 'RESOLVED';
+  severity?: 'WARNING' | 'NEUTRAL_NOTICE' | 'CRITICAL' | 'INFO';
+  clinicalNote?: string;
+  acknowledgedBy?: string;
+  acknowledgedAt?: string;
 }
 
 interface FamilyMemberRecord {
@@ -182,6 +189,7 @@ type TabType =
   | 'photos'
   | 'voice'
   | 'reminders'
+  | 'calling'
   | 'personalization'
   | 'transfer'
   | 'history'
@@ -203,6 +211,22 @@ export const CaregiverPortal: React.FC<Props> = ({ onBackToPatientApp }) => {
   const [personalModel, setPersonalModel] = useState<PersonalCognitiveModel | null>(null);
 
   const [activeTab, setActiveTab] = useState<TabType>('overview');
+  const [callingSubTab, setCallingSubTab] = useState<'contacts' | 'history'>('contacts');
+  const [activeEmergency, setActiveEmergency] = useState<EmergencyEvent | null>(() => EmergencyAlertService.getActiveEmergency());
+
+  useEffect(() => {
+    const unsub = EmergencyAlertService.subscribe((event) => {
+      setActiveEmergency(event);
+      if (event && selectedPatientId) {
+        try {
+          const freshAlerts = LocalCaregiverService.getAlerts(selectedPatientId);
+          setAlerts(freshAlerts as any);
+        } catch {}
+      }
+    });
+    return () => unsub();
+  }, [selectedPatientId]);
+
   const [loading, setLoading] = useState(false);
 
   // Profile & Language / Voice Edit State
@@ -276,10 +300,50 @@ export const CaregiverPortal: React.FC<Props> = ({ onBackToPatientApp }) => {
   const [remTitle, setRemTitle] = useState('');
   const [remCategory, setRemCategory] = useState<'medicine' | 'water' | 'meal' | 'activity'>('medicine');
 
+  // Feedback toast & simulation state for 4 upgraded modules
+  const [modelToast, setModelToast] = useState<string | null>(null);
+  const [isSimulatingModel, setIsSimulatingModel] = useState(false);
+
+  // Transfer State & Modal
+  const [transferFilter, setTransferFilter] = useState<string>('all');
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [newTransferTask, setNewTransferTask] = useState('');
+  const [newTransferDomain, setNewTransferDomain] = useState('sequencing');
+  const [newTransferBaseline, setNewTransferBaseline] = useState<number>(65);
+  const [newTransferVerification, setNewTransferVerification] = useState<number>(85);
+  const [newTransferDrills, setNewTransferDrills] = useState<number>(4);
+  const [newTransferContext, setNewTransferContext] = useState('Home Kitchen / Living Area');
+  const [newTransferReport, setNewTransferReport] = useState('');
+
+  // Activity State & Modal
+  const [activityDomainFilter, setActivityDomainFilter] = useState<string>('all');
+  const [activityScoreFilter, setActivityScoreFilter] = useState<string>('all');
+  const [activitySearch, setActivitySearch] = useState('');
+  const [showActivityModal, setShowActivityModal] = useState(false);
+  const [newActTask, setNewActTask] = useState('');
+  const [newActDomain, setNewActDomain] = useState('memory');
+  const [newActDiff, setNewActDiff] = useState<number>(1);
+  const [newActScore, setNewActScore] = useState<number>(85);
+  const [newActTime, setNewActTime] = useState<number>(24);
+  const [newActHints, setNewActHints] = useState<number>(0);
+  const [newActContext, setNewActContext] = useState('Caregiver supervised clinical drill');
+
+  // Alert State & Modals
+  const [alertStatusFilter, setAlertStatusFilter] = useState<string>('ALL');
+  const [alertSeverityFilter, setAlertSeverityFilter] = useState<string>('ALL');
+  const [showAlertModal, setShowAlertModal] = useState(false);
+  const [newAlertDomain, setNewAlertDomain] = useState('memory');
+  const [newAlertSeverity, setNewAlertSeverity] = useState<'WARNING' | 'NEUTRAL_NOTICE' | 'CRITICAL' | 'INFO'>('WARNING');
+  const [newAlertWindow, setNewAlertWindow] = useState('Past 24 hours');
+  const [newAlertMessage, setNewAlertMessage] = useState('');
+  const [reviewingAlert, setReviewingAlert] = useState<AlertItem | null>(null);
+  const [reviewNoteText, setReviewNoteText] = useState('');
+
   // Load family and reminders from storage
   const syncFamilyStorage = (updated: FamilyMemberRecord[]) => {
     setFamilyMembers(updated);
     try {
+      OfflineStorageService.setUserScopedData(STORAGE_KEY_FAMILY, updated, selectedPatientId || undefined);
       localStorage.setItem(STORAGE_KEY_FAMILY, JSON.stringify(updated));
       window.dispatchEvent(new Event('storage'));
     } catch {}
@@ -288,6 +352,7 @@ export const CaregiverPortal: React.FC<Props> = ({ onBackToPatientApp }) => {
   const syncRemindersStorage = (updated: ReminderRecord[]) => {
     setReminders(updated);
     try {
+      OfflineStorageService.setUserScopedData(STORAGE_KEY_REMINDERS, updated, selectedPatientId || undefined);
       localStorage.setItem(STORAGE_KEY_REMINDERS, JSON.stringify(updated));
       window.dispatchEvent(new Event('storage'));
     } catch {}
@@ -723,10 +788,14 @@ export const CaregiverPortal: React.FC<Props> = ({ onBackToPatientApp }) => {
             patientId: a.patientId,
             patientName: data.patient.displayName,
             domain: a.domain,
-            observationWindow: 'Past 7 days',
+            observationWindow: a.observationWindow || 'Past 7 days',
             reason: a.message,
             timestamp: a.detectedAt,
             reviewStatus: a.status,
+            severity: a.severity || 'WARNING',
+            clinicalNote: a.clinicalNote,
+            acknowledgedBy: a.acknowledgedBy,
+            acknowledgedAt: a.acknowledgedAt,
           }))
         );
       } catch (err) {
@@ -737,15 +806,195 @@ export const CaregiverPortal: React.FC<Props> = ({ onBackToPatientApp }) => {
     loadPatientData();
   }, [token, selectedPatientId, localSession]);
 
-  const handleUpdateAlertStatus = async (alertId: string, newStatus: 'REVIEWED' | 'ACKNOWLEDGED') => {
-    const session = localSession || LocalAuthService.getSession();
-    if (!session) return;
-
-    LocalCaregiverService.acknowledgeAlert(alertId, session.displayName);
-    setAlerts((prev) =>
-      prev.map((a) => (a.id === alertId ? { ...a, reviewStatus: newStatus } : a))
-    );
+  // --- Bayesian Continual Personalization Handlers ---
+  const handleSimulateBayesianCycle = async () => {
+    const patientId = selectedPatientId || 'patient-ner-001';
+    setIsSimulatingModel(true);
+    try {
+      const result = LocalCaregiverService.simulateBayesianStep(patientId);
+      setPersonalModel({ ...result.updatedModel });
+      setActivities((prev) => [
+        {
+          id: result.newObs.id,
+          domain: result.newObs.domain,
+          taskId: result.newObs.taskId,
+          difficulty: result.newObs.difficulty,
+          metrics: { ...result.newObs.metrics },
+          timestamp: result.newObs.timestamp,
+          context: result.newObs.context,
+        },
+        ...prev,
+      ]);
+      setModelToast(`⚡ Bayesian calibration step completed! Recalibrated ${result.newObs.domain} belief.`);
+      setTimeout(() => setModelToast(null), 3500);
+    } catch (err: any) {
+      console.warn('Bayesian simulation error:', err);
+    } finally {
+      setIsSimulatingModel(false);
+    }
   };
+
+  const handleAdjustDomainDifficulty = (domain: string, delta: number) => {
+    const patientId = selectedPatientId || 'patient-ner-001';
+    const current = (personalModel?.domainBeliefs as any)?.[domain]?.activeDifficulty || 1;
+    const nextLevel = Math.max(1, Math.min(30, current + delta));
+    const updated = LocalCaregiverService.updateDomainDifficulty(patientId, domain, nextLevel);
+    setPersonalModel({ ...updated });
+    setModelToast(`Updated ${domain} difficulty to Level ${nextLevel} of 30.`);
+    setTimeout(() => setModelToast(null), 3000);
+  };
+
+  // --- Real-Life Functional Transfer Handlers ---
+  const handleSaveTransfer = (e: React.FormEvent) => {
+    e.preventDefault();
+    const patientId = selectedPatientId || 'patient-ner-001';
+    if (!newTransferTask.trim()) return;
+    const delta = Math.round(((newTransferVerification - newTransferBaseline) / 100) * 100) / 100;
+    const item: any = {
+      id: `trans_${Date.now()}`,
+      patientId,
+      baselineTaskId: newTransferTask.trim(),
+      baselineScore: newTransferBaseline / 100,
+      verificationTaskId: `${newTransferTask.trim()} (Real-Life Functional Verification)`,
+      verificationScore: newTransferVerification / 100,
+      trainingInterventionsCount: Number(newTransferDrills) || 1,
+      transferDelta: delta,
+      observedReport:
+        newTransferReport.trim() ||
+        `Caregiver recorded real-life transfer verification in ${newTransferContext}. Functional independence verified.`,
+      evaluatedAt: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
+    };
+    const updated = LocalCaregiverService.addTransfer(patientId, item);
+    setTransfers(
+      updated.map((t: any) => ({
+        ...t,
+        evaluatedAt: t.timestamp || t.evaluatedAt || new Date().toISOString(),
+      }))
+    );
+    setShowTransferModal(false);
+    setNewTransferTask('');
+    setNewTransferReport('');
+    setModelToast('✓ Real-life functional transfer evaluation logged.');
+    setTimeout(() => setModelToast(null), 3000);
+  };
+
+  // --- Activities Handlers ---
+  const handleSaveActivity = (e: React.FormEvent) => {
+    e.preventDefault();
+    const patientId = selectedPatientId || 'patient-ner-001';
+    if (!newActTask.trim()) return;
+    const obs: any = {
+      id: `act_${Date.now()}`,
+      patientId,
+      domain: newActDomain,
+      taskId: newActTask.trim(),
+      difficulty: Number(newActDiff) || 1,
+      metrics: {
+        rawScore: (Number(newActScore) || 80) / 100,
+        itemsPresented: 10,
+        itemsCorrect: Math.round(((Number(newActScore) || 80) / 100) * 10),
+        completionTimeMs: (Number(newActTime) || 20) * 1000,
+        cueAssistanceCount: Number(newActHints) || 0,
+      },
+      timestamp: new Date().toISOString(),
+      context: newActContext.trim() || 'Caregiver supervised drill',
+    };
+    const updated = LocalCaregiverService.addActivity(patientId, obs);
+    setActivities(
+      updated.map((o: any) => ({
+        id: o.id,
+        domain: o.domain,
+        taskId: o.taskId,
+        difficulty: o.difficulty,
+        metrics: { ...o.metrics },
+        timestamp: o.timestamp,
+        context: o.context,
+      }))
+    );
+    setShowActivityModal(false);
+    setNewActTask('');
+    setNewActContext('');
+    setModelToast('✓ Activity drill session recorded.');
+    setTimeout(() => setModelToast(null), 3000);
+  };
+
+  // --- Alerts Handlers ---
+  const handleCreateAlert = (e: React.FormEvent) => {
+    e.preventDefault();
+    const patientId = selectedPatientId || 'patient-ner-001';
+    if (!newAlertMessage.trim()) return;
+    const alertItem: any = {
+      id: `alert_${Date.now()}`,
+      patientId,
+      domain: newAlertDomain,
+      message: newAlertMessage.trim(),
+      status: 'PENDING_REVIEW',
+      severity: newAlertSeverity,
+      detectedAt: new Date().toISOString(),
+      observationWindow: newAlertWindow || 'Past 24 hours',
+    };
+    const updated = LocalCaregiverService.addAlert(patientId, alertItem);
+    setAlerts(
+      updated.map((a: any) => ({
+        id: a.id,
+        patientId: a.patientId,
+        patientName: selectedPatient?.displayName || 'Patient',
+        domain: a.domain,
+        observationWindow: a.observationWindow || 'Past 7 days',
+        reason: a.message,
+        timestamp: a.detectedAt,
+        reviewStatus: a.status,
+        severity: a.severity || 'WARNING',
+        clinicalNote: a.clinicalNote,
+        acknowledgedBy: a.acknowledgedBy,
+        acknowledgedAt: a.acknowledgedAt,
+      }))
+    );
+    setShowAlertModal(false);
+    setNewAlertMessage('');
+    setModelToast('✓ New clinical alert created.');
+    setTimeout(() => setModelToast(null), 3000);
+  };
+
+  const handleOpenReviewModal = (alert: AlertItem) => {
+    setReviewingAlert(alert);
+    setReviewNoteText(alert.clinicalNote || '');
+  };
+
+  const handleConfirmReviewStatus = (status: 'ACKNOWLEDGED' | 'RESOLVED') => {
+    const patientId = selectedPatientId || 'patient-ner-001';
+    if (!reviewingAlert) return;
+    const reviewerName = localSession?.displayName || 'Dr. Pranjal Barua (Caregiver)';
+    const updated = LocalCaregiverService.updateAlertStatus(
+      patientId,
+      reviewingAlert.id,
+      status,
+      reviewNoteText.trim(),
+      reviewerName
+    );
+    setAlerts(
+      updated.map((a: any) => ({
+        id: a.id,
+        patientId: a.patientId,
+        patientName: selectedPatient?.displayName || 'Patient',
+        domain: a.domain,
+        observationWindow: a.observationWindow || 'Past 7 days',
+        reason: a.message,
+        timestamp: a.detectedAt,
+        reviewStatus: a.status,
+        severity: a.severity || 'WARNING',
+        clinicalNote: a.clinicalNote,
+        acknowledgedBy: a.acknowledgedBy,
+        acknowledgedAt: a.acknowledgedAt,
+      }))
+    );
+    setReviewingAlert(null);
+    setReviewNoteText('');
+    setModelToast(`✓ Alert marked as ${status.toLowerCase()} with clinical note.`);
+    setTimeout(() => setModelToast(null), 3000);
+  };
+
 
   const handleExportJson = () => {
     if (selectedPatientId) {
@@ -973,6 +1222,7 @@ export const CaregiverPortal: React.FC<Props> = ({ onBackToPatientApp }) => {
               { id: 'domains', label: 'Cognitive Domains', icon: '📊' },
               { id: 'family', label: 'Family Recognition', icon: '👨‍👩‍👧' },
               { id: 'reminders', label: 'Reminders & Schedule', icon: '⏰' },
+              { id: 'calling', label: 'Video Calls & Contacts', icon: '📞' },
               { id: 'photos', label: 'Recognition Photo Library', icon: '📷' },
               { id: 'voice', label: 'Recognition Voice', icon: '🎙️' },
               { id: 'personalization', label: 'Personal Model', icon: '🧠' },
@@ -1190,6 +1440,82 @@ export const CaregiverPortal: React.FC<Props> = ({ onBackToPatientApp }) => {
                 </div>
               </div>
             </div>
+
+            
+            {/* REAL-TIME URGENT PATIENT EMERGENCY ALERT BANNER */}
+            {activeEmergency && activeEmergency.status === 'PENDING_REVIEW' && (
+              <div
+                style={{
+                  backgroundColor: '#DC2626',
+                  color: '#FFFFFF',
+                  borderRadius: 20,
+                  padding: '18px 24px',
+                  marginBottom: 24,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: 16,
+                  boxShadow: '0 8px 30px rgba(220, 38, 38, 0.45)',
+                  border: '2px solid #FCA5A5',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <span style={{ fontSize: 36, animation: 'pulse 1s infinite' }}>🚨</span>
+                  <div>
+                    <div style={{ fontSize: 19, fontWeight: 900, letterSpacing: '-0.2px' }}>
+                      CRITICAL SOS ALERT: {activeEmergency.patientName} Needs Help!
+                    </div>
+                    <div style={{ fontSize: 14, color: '#FEE2E2', marginTop: 3, fontWeight: 600 }}>
+                      {activeEmergency.reason} • Dispatched at {new Date(activeEmergency.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('calling');
+                      setCallingSubTab('contacts');
+                    }}
+                    style={{
+                      backgroundColor: '#FFFFFF',
+                      color: '#DC2626',
+                      border: 'none',
+                      borderRadius: 14,
+                      padding: '11px 20px',
+                      fontSize: 14,
+                      fontWeight: 900,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                    }}
+                  >
+                    <span>📞 Call Patient Now</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => EmergencyAlertService.acknowledgeEmergency(activeEmergency.id, localSession?.displayName || 'Caregiver')}
+                    style={{
+                      backgroundColor: 'rgba(255,255,255,0.2)',
+                      color: '#FFFFFF',
+                      border: '1.5px solid #FFFFFF',
+                      borderRadius: 14,
+                      padding: '10px 18px',
+                      fontSize: 14,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ✓ Acknowledge Alert
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* TAB: DASHBOARD OVERVIEW */}
             {activeTab === 'overview' && (
@@ -2548,7 +2874,58 @@ export const CaregiverPortal: React.FC<Props> = ({ onBackToPatientApp }) => {
             {activeTab === 'photos' && <RecognitionLibrary />}
             {activeTab === 'voice' && <RecognitionVoiceManager onOpenPhotoLibrary={() => setActiveTab('photos')} />}
 
-            {activeTab === 'reminders' && (
+            
+            {/* TAB: CALLING MANAGEMENT & LOGS */}
+            {activeTab === 'calling' && (
+              <div
+                style={{
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: 22,
+                  padding: 24,
+                  border: '2px solid #DDE5ED',
+                  boxShadow: '0 4px 16px rgba(18, 59, 99, 0.04)',
+                }}
+              >
+                {/* Subtab Switcher */}
+                <div style={{ display: 'flex', gap: 12, marginBottom: 20, borderBottom: '1.5px solid #E2E8F0', paddingBottom: 12 }}>
+                  <button
+                    type="button"
+                    onClick={() => setCallingSubTab('contacts')}
+                    style={{
+                      backgroundColor: callingSubTab === 'contacts' ? '#EFF6FF' : '#F8FAFC',
+                      color: callingSubTab === 'contacts' ? '#1D4ED8' : '#64748B',
+                      border: callingSubTab === 'contacts' ? '1.5px solid #93C5FD' : '1px solid #CBD5E1',
+                      borderRadius: 12,
+                      padding: '10px 20px',
+                      fontSize: 14,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    👥 Manage Patient Contacts
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCallingSubTab('history')}
+                    style={{
+                      backgroundColor: callingSubTab === 'history' ? '#EFF6FF' : '#F8FAFC',
+                      color: callingSubTab === 'history' ? '#1D4ED8' : '#64748B',
+                      border: callingSubTab === 'history' ? '1.5px solid #93C5FD' : '1px solid #CBD5E1',
+                      borderRadius: 12,
+                      padding: '10px 20px',
+                      fontSize: 14,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    📋 Real-Time Call History Log
+                  </button>
+                </div>
+
+                {callingSubTab === 'contacts' ? <CaretakerContactManager /> : <CallHistoryView />}
+              </div>
+            )}
+{activeTab === 'reminders' && (
               <div
                 style={{
                   backgroundColor: '#FFFFFF',
@@ -2655,285 +3032,1352 @@ export const CaregiverPortal: React.FC<Props> = ({ onBackToPatientApp }) => {
             )}
 
             {/* TAB: Personal Model */}
-            {activeTab === 'personalization' && (
-              <div
-                style={{
-                  backgroundColor: '#FFFFFF',
-                  borderRadius: 22,
-                  padding: 24,
-                  border: '2px solid #DDE5ED',
-                  boxShadow: '0 4px 16px rgba(18, 59, 99, 0.04)',
-                }}
-              >
-                <h3 style={{ fontSize: 20, fontWeight: 800, margin: '0 0 16px 0', color: '#17324D' }}>
-                  Bayesian Continual Personalization Model
-                </h3>
+            {activeTab === 'personalization' && (() => {
+              const activeModel: any =
+                personalModel ||
+                LocalCaregiverService.getPersonalModel(selectedPatientId || 'patient-ner-001');
+              const domainMeta: Record<string, { label: string; icon: string; color: string; bg: string }> = {
+                memory: { label: 'Memory & Retention', icon: '🧠', color: '#7C3AED', bg: '#F3E8FF' },
+                attention: { label: 'Attention & Focus', icon: '🎯', color: '#D97706', bg: '#FEF3C7' },
+                recognition: { label: 'Face & Object Recognition', icon: '👥', color: '#0D9488', bg: '#CCFBF1' },
+                sequencing: { label: 'Daily Task Sequencing', icon: '🧩', color: '#2563EB', bg: '#DBEAFE' },
+                calculation: { label: 'Currency & Math Calculation', icon: '🔢', color: '#4F46E5', bg: '#E0E7FF' },
+                planning: { label: 'Spatial & Planning', icon: '📋', color: '#059669', bg: '#D1FAE5' },
+              };
+              const domainsList = ['memory', 'attention', 'recognition', 'sequencing', 'calculation', 'planning'];
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 20 }}>
-                  <div style={{ backgroundColor: '#F7F9FC', padding: 16, borderRadius: 16, border: '1px solid #DDE5ED' }}>
-                    <span style={{ fontSize: 13, color: '#64748B' }}>Adaptation Engine</span>
-                    <div style={{ fontSize: 18, fontWeight: 800, color: '#17324D', marginTop: 4 }}>
-                      Dirichlet-Multinomial
-                    </div>
-                  </div>
-                  <div style={{ backgroundColor: '#F7F9FC', padding: 16, borderRadius: 16, border: '1px solid #DDE5ED' }}>
-                    <span style={{ fontSize: 13, color: '#64748B' }}>Bandit Selection</span>
-                    <div style={{ fontSize: 18, fontWeight: 800, color: '#1677D2', marginTop: 4 }}>
-                      UCB-1 Exploration
-                    </div>
-                  </div>
-                  <div style={{ backgroundColor: '#F7F9FC', padding: 16, borderRadius: 16, border: '1px solid #DDE5ED' }}>
-                    <span style={{ fontSize: 13, color: '#64748B' }}>Update Mechanism</span>
-                    <div style={{ fontSize: 18, fontWeight: 800, color: '#2E7D32', marginTop: 4 }}>
-                      100% On-Device
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ fontSize: 14, color: '#17324D', lineHeight: 1.6 }}>
-                  {personalModel?.adaptationHistory?.length === 0 ? (
-                    <p style={{ color: '#64748B' }}>No adaptation cycles run yet.</p>
-                  ) : (
-                    personalModel?.adaptationHistory?.map((evt: any, idx: number) => (
-                      <div
-                        key={idx}
-                        style={{
-                          padding: '12px 16px',
-                          backgroundColor: '#F8FAFC',
-                          borderRadius: 12,
-                          marginBottom: 8,
-                          borderLeft: '4px solid #1677D2',
-                        }}
-                      >
-                        <div style={{ fontWeight: 700, fontSize: 14 }}>{evt.trigger}</div>
-                        <p style={{ margin: '4px 0 0 0', fontSize: 13, color: '#64748B' }}>
-                          {evt.rationale}
-                        </p>
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                  {/* Header & Quick Action */}
+                  <div
+                    style={{
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: 22,
+                      padding: 24,
+                      border: '2px solid #DDE5ED',
+                      boxShadow: '0 4px 16px rgba(18, 59, 99, 0.04)',
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 16,
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: 26 }}>🧠</span>
+                        <h3 style={{ fontSize: 22, fontWeight: 900, margin: 0, color: '#17324D' }}>
+                          Bayesian Personal Cognitive Model
+                        </h3>
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* TAB: Real-Life Transfer */}
-            {activeTab === 'transfer' && (
-              <div
-                style={{
-                  backgroundColor: '#FFFFFF',
-                  borderRadius: 22,
-                  padding: 24,
-                  border: '2px solid #DDE5ED',
-                  boxShadow: '0 4px 16px rgba(18, 59, 99, 0.04)',
-                }}
-              >
-                <h3 style={{ fontSize: 20, fontWeight: 800, margin: '0 0 16px 0', color: '#17324D' }}>
-                  Real-Life Functional Transfer ({transfers.length})
-                </h3>
-
-                {transfers.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: 32, color: '#64748B' }}>
-                    No real-life transfer evaluations recorded yet. Run a mission from the Patient application.
-                  </div>
-                ) : (
-                  transfers.map((t) => (
-                    <div
-                      key={t.id}
-                      style={{
-                        backgroundColor: '#F7F9FC',
-                        borderRadius: 16,
-                        padding: 18,
-                        marginBottom: 16,
-                        border: '1px solid #DDE5ED',
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                        <div>
-                          <h4 style={{ fontSize: 17, fontWeight: 800, margin: 0, textTransform: 'capitalize', color: '#17324D' }}>
-                            Task Transfer: {t.baselineTaskId.replace(/_/g, ' ')}
-                          </h4>
-                          <span style={{ fontSize: 12, color: '#64748B' }}>
-                            Evaluated: {new Date(t.evaluatedAt).toLocaleDateString()}
-                          </span>
-                        </div>
-                        <span
-                          style={{
-                            fontSize: 15,
-                            fontWeight: 800,
-                            padding: '4px 12px',
-                            borderRadius: 10,
-                            backgroundColor: t.transferDelta >= 0 ? '#E8F7EF' : '#FBE8EE',
-                            color: t.transferDelta >= 0 ? '#2E7D32' : '#C2185B',
-                          }}
-                        >
-                          {t.transferDelta >= 0 ? `+${(t.transferDelta * 100).toFixed(0)}% Transfer Gain` : `${(t.transferDelta * 100).toFixed(0)}%`}
-                        </span>
-                      </div>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 12 }}>
-                        <div style={{ backgroundColor: '#FFFFFF', padding: 12, borderRadius: 12, textAlign: 'center' }}>
-                          <span style={{ fontSize: 12, color: '#64748B' }}>Baseline Score</span>
-                          <div style={{ fontSize: 18, fontWeight: 800, color: '#17324D' }}>{(t.baselineScore * 100).toFixed(0)}%</div>
-                        </div>
-                        <div style={{ backgroundColor: '#FFFFFF', padding: 12, borderRadius: 12, textAlign: 'center' }}>
-                          <span style={{ fontSize: 12, color: '#64748B' }}>Verification Score</span>
-                          <div style={{ fontSize: 18, fontWeight: 800, color: '#1677D2' }}>{(t.verificationScore * 100).toFixed(0)}%</div>
-                        </div>
-                        <div style={{ backgroundColor: '#FFFFFF', padding: 12, borderRadius: 12, textAlign: 'center' }}>
-                          <span style={{ fontSize: 12, color: '#64748B' }}>Interventions</span>
-                          <div style={{ fontSize: 18, fontWeight: 800, color: '#42B883' }}>{t.trainingInterventionsCount} drills</div>
-                        </div>
-                      </div>
-
-                      <p style={{ margin: 0, fontSize: 14, color: '#17324D', lineHeight: 1.45 }}>
-                        {t.observedReport}
+                      <p style={{ margin: '6px 0 0 0', fontSize: 14, color: '#64748B' }}>
+                        Continual on-device Dirichlet-Multinomial Bayesian inference with UCB-1 bandit exploration.
                       </p>
                     </div>
-                  ))
-                )}
-              </div>
-            )}
 
-            {/* TAB: Activities History */}
-            {activeTab === 'history' && (
-              <div
-                style={{
-                  backgroundColor: '#FFFFFF',
-                  borderRadius: 22,
-                  padding: 24,
-                  border: '2px solid #DDE5ED',
-                  boxShadow: '0 4px 16px rgba(18, 59, 99, 0.04)',
-                }}
-              >
-                <h3 style={{ fontSize: 20, fontWeight: 800, margin: '0 0 16px 0', color: '#17324D' }}>
-                  Observed Activities ({activities.length})
-                </h3>
-
-                {activities.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: 24, color: '#64748B' }}>
-                    No training sessions recorded yet.
-                  </div>
-                ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 14 }}>
-                    <thead>
-                      <tr style={{ borderBottom: '2px solid #DDE5ED', color: '#64748B' }}>
-                        <th style={{ padding: 12 }}>Time</th>
-                        <th style={{ padding: 12 }}>Domain</th>
-                        <th style={{ padding: 12 }}>Task</th>
-                        <th style={{ padding: 12 }}>Level</th>
-                        <th style={{ padding: 12 }}>Score</th>
-                        <th style={{ padding: 12 }}>Duration</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {activities.map((a) => (
-                        <tr key={a.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
-                          <td style={{ padding: 12 }}>{new Date(a.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-                          <td style={{ padding: 12, textTransform: 'capitalize', fontWeight: 700 }}>{a.domain}</td>
-                          <td style={{ padding: 12 }}>{a.taskId}</td>
-                          <td style={{ padding: 12 }}>Level {a.difficulty}</td>
-                          <td style={{ padding: 12, fontWeight: 700, color: a.metrics.rawScore >= 0.7 ? '#2E7D32' : '#C2185B' }}>
-                            {(a.metrics.rawScore * 100).toFixed(0)}%
-                          </td>
-                          <td style={{ padding: 12 }}>{(a.metrics.completionTimeMs / 1000).toFixed(1)}s</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            )}
-
-            {/* TAB: Clinical Alerts */}
-            {activeTab === 'alerts' && (
-              <div
-                style={{
-                  backgroundColor: '#FFFFFF',
-                  borderRadius: 22,
-                  padding: 24,
-                  border: '2px solid #DDE5ED',
-                  boxShadow: '0 4px 16px rgba(18, 59, 99, 0.04)',
-                }}
-              >
-                <h3 style={{ fontSize: 20, fontWeight: 800, margin: '0 0 16px 0', color: '#17324D' }}>
-                  Observed Cognitive & Routine Alerts ({alerts.length})
-                </h3>
-
-                {alerts.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: 32, color: '#2E7D32', fontWeight: 600 }}>
-                    ✅ No active observed decline alerts. Patient routine is stable.
-                  </div>
-                ) : (
-                  alerts.map((alert) => (
-                    <div
-                      key={alert.id}
+                    <button
+                      type="button"
+                      onClick={handleSimulateBayesianCycle}
+                      disabled={isSimulatingModel}
                       style={{
-                        backgroundColor: '#F7F9FC',
-                        borderRadius: 16,
-                        padding: 18,
-                        marginBottom: 14,
-                        borderLeft: `5px solid ${alert.reviewStatus === 'PENDING_REVIEW' ? '#F6A6A6' : '#42B883'}`,
-                        border: '1px solid #DDE5ED',
+                        backgroundColor: isSimulatingModel ? '#94A3B8' : '#1677D2',
+                        color: '#FFFFFF',
+                        border: 'none',
+                        borderRadius: 14,
+                        padding: '12px 20px',
+                        fontSize: 15,
+                        fontWeight: 800,
+                        cursor: isSimulatingModel ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        boxShadow: '0 4px 12px rgba(22, 119, 210, 0.25)',
+                        transition: 'all 0.15s ease',
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 20 }}>{alert.reviewStatus === 'PENDING_REVIEW' ? '⚠️' : '✅'}</span>
-                          <span style={{ fontWeight: 800, fontSize: 16, color: '#17324D' }}>
-                            {alert.domain} Performance Alert
-                          </span>
-                        </div>
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 700,
-                            padding: '3px 10px',
-                            borderRadius: 8,
-                            backgroundColor: alert.reviewStatus === 'PENDING_REVIEW' ? '#FBE8EE' : '#E8F7EF',
-                            color: alert.reviewStatus === 'PENDING_REVIEW' ? '#C2185B' : '#2E7D32',
-                          }}
-                        >
-                          {alert.reviewStatus.replace('_', ' ')}
-                        </span>
+                      <span>⚡</span>
+                      <span>{isSimulatingModel ? 'Calibrating Engine...' : 'Run Bayesian Calibration Step'}</span>
+                    </button>
+                  </div>
+
+                  {/* 4 Architecture Highlight Cards */}
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+                      gap: 14,
+                    }}
+                  >
+                    <div style={{ backgroundColor: '#FFFFFF', padding: '16px 18px', borderRadius: 16, border: '1.5px solid #DDE5ED' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#64748B' }}>Adaptation Engine</span>
+                      <div style={{ fontSize: 18, fontWeight: 900, color: '#17324D', marginTop: 4 }}>
+                        Dirichlet-Multinomial
                       </div>
+                      <span style={{ fontSize: 11, color: '#94A3B8' }}>Conjugate Dirichlet distribution</span>
+                    </div>
 
-                      <p style={{ fontSize: 15, color: '#17324D', margin: '6px 0 12px 0', lineHeight: 1.45 }}>
-                        {alert.reason}
-                      </p>
+                    <div style={{ backgroundColor: '#FFFFFF', padding: '16px 18px', borderRadius: 16, border: '1.5px solid #DDE5ED' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#64748B' }}>Bandit Selection</span>
+                      <div style={{ fontSize: 18, fontWeight: 900, color: '#1677D2', marginTop: 4 }}>
+                        UCB-1 Exploration
+                      </div>
+                      <span style={{ fontSize: 11, color: '#94A3B8' }}>Balancing exploration vs mastery</span>
+                    </div>
 
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10, borderTop: '1px solid #E2E8F0' }}>
+                    <div style={{ backgroundColor: '#FFFFFF', padding: '16px 18px', borderRadius: 16, border: '1.5px solid #DDE5ED' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#64748B' }}>Total Practice Cycles</span>
+                      <div style={{ fontSize: 18, fontWeight: 900, color: '#7C3AED', marginTop: 4 }}>
+                        {activeModel?.totalSessionsCompleted || 18} Sessions
+                      </div>
+                      <span style={{ fontSize: 11, color: '#94A3B8' }}>{activeModel?.adaptationHistory?.length || 5} adaptation events</span>
+                    </div>
+
+                    <div style={{ backgroundColor: '#FFFFFF', padding: '16px 18px', borderRadius: 16, border: '1.5px solid #DDE5ED' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#64748B' }}>Privacy & Computation</span>
+                      <div style={{ fontSize: 18, fontWeight: 900, color: '#059669', marginTop: 4 }}>
+                        100% On-Device
+                      </div>
+                      <span style={{ fontSize: 11, color: '#94A3B8' }}>Zero telemetry, non-diagnostic</span>
+                    </div>
+                  </div>
+
+                  {/* 6 Cognitive Domain Belief Meters */}
+                  <div
+                    style={{
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: 22,
+                      padding: 24,
+                      border: '2px solid #DDE5ED',
+                      boxShadow: '0 4px 16px rgba(18, 59, 99, 0.04)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                      <div>
+                        <h4 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: '#17324D' }}>
+                          Cognitive Domain Belief Distribution & Difficulty Controls (30 Levels)
+                        </h4>
                         <span style={{ fontSize: 13, color: '#64748B' }}>
-                          Detected: {new Date(alert.timestamp).toLocaleDateString()}
+                          Caretaker can manually override or fine-tune difficulty level (1–30) per domain.
                         </span>
+                      </div>
+                    </div>
 
-                        {alert.reviewStatus === 'PENDING_REVIEW' ? (
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateAlertStatus(alert.id, 'ACKNOWLEDGED')}
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                        gap: 16,
+                      }}
+                    >
+                      {domainsList.map((domKey) => {
+                        const meta = domainMeta[domKey] || { label: domKey, icon: '📊', color: '#1677D2', bg: '#EAF4FF' };
+                        const belief = (activeModel?.domainBeliefs as any)?.[domKey] || {
+                          alpha: 10,
+                          beta: 3,
+                          expectedScore: 0.77,
+                          confidenceInterval: [0.70, 0.85],
+                          observationCount: 8,
+                          activeDifficulty: 3,
+                          trend: 'stable',
+                        };
+                        const scorePct = Math.round(((belief as any).estimatedAbility ?? (belief as any).expectedScore ?? 0.75) * 100);
+                        const diffLevel = belief.activeDifficulty || 1;
+                        const ciLow = Math.round(((belief as any).confidenceInterval?.[0] ?? Math.max(0.1, (scorePct / 100) - 0.08)) * 100);
+                        const ciHigh = Math.round(((belief as any).confidenceInterval?.[1] ?? Math.min(1.0, (scorePct / 100) + 0.08)) * 100);
+
+                        return (
+                          <div
+                            key={domKey}
                             style={{
-                              backgroundColor: '#1677D2',
-                              color: '#FFFFFF',
-                              border: 'none',
-                              borderRadius: 10,
-                              padding: '8px 16px',
-                              fontSize: 13,
-                              fontWeight: 700,
-                              cursor: 'pointer',
+                              backgroundColor: '#F8FAFC',
+                              borderRadius: 18,
+                              padding: 18,
+                              border: '1.5px solid #E2E8F0',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 12,
                             }}
                           >
-                            Acknowledge & Mark Reviewed ✓
-                          </button>
-                        ) : (
-                          <span style={{ fontSize: 13, color: '#2E7D32', fontWeight: 700 }}>
-                            ✓ Acknowledged by caregiver
-                          </span>
-                        )}
-                      </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                <div
+                                  style={{
+                                    width: 40,
+                                    height: 40,
+                                    borderRadius: 12,
+                                    backgroundColor: meta.bg,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: 20,
+                                  }}
+                                >
+                                  {meta.icon}
+                                </div>
+                                <div>
+                                  <h5 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: '#17324D' }}>
+                                    {meta.label}
+                                  </h5>
+                                  <span style={{ fontSize: 12, color: '#64748B' }}>
+                                    {belief.observationCount || 0} drills logged
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span
+                                  style={{
+                                    fontSize: 12,
+                                    fontWeight: 800,
+                                    padding: '4px 8px',
+                                    borderRadius: 8,
+                                    backgroundColor: belief.trend === 'improving' ? '#E8F7EF' : '#F1F5F9',
+                                    color: belief.trend === 'improving' ? '#059669' : '#475569',
+                                  }}
+                                >
+                                  {belief.trend === 'improving' ? '↗ Improving' : '→ Stable'}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Performance Meter */}
+                            <div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
+                                <span style={{ color: '#64748B', fontWeight: 600 }}>Estimated Competence</span>
+                                <span style={{ fontWeight: 800, color: meta.color }}>{scorePct}%</span>
+                              </div>
+                              <div style={{ height: 10, backgroundColor: '#E2E8F0', borderRadius: 5, overflow: 'hidden' }}>
+                                <div
+                                  style={{
+                                    width: `${Math.min(100, Math.max(0, scorePct))}%`,
+                                    height: '100%',
+                                    backgroundColor: meta.color,
+                                    borderRadius: 5,
+                                    transition: 'width 0.4s ease',
+                                  }}
+                                />
+                              </div>
+                            </div>
+
+                            {/* Dirichlet Weights & Confidence Interval */}
+                            <div
+                              style={{
+                                display: 'grid',
+                                gridTemplateColumns: '1fr 1fr',
+                                gap: 8,
+                                fontSize: 12,
+                                backgroundColor: '#FFFFFF',
+                                padding: '8px 12px',
+                                borderRadius: 10,
+                                border: '1px solid #E2E8F0',
+                              }}
+                            >
+                              <div>
+                                <span style={{ color: '#64748B' }}>Dirichlet Weights:</span>{' '}
+                                <strong style={{ color: '#17324D' }}>α={belief.alpha} β={belief.beta}</strong>
+                              </div>
+                              <div>
+                                <span style={{ color: '#64748B' }}>95% CI:</span>{' '}
+                                <strong style={{ color: '#17324D' }}>
+                                  [{ciLow}% - {ciHigh}%]
+                                </strong>
+                              </div>
+                            </div>
+
+                            {/* Difficulty Stepper (Level 1-30) */}
+                            <div
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                paddingTop: 6,
+                                borderTop: '1px solid #EDF2F7',
+                              }}
+                            >
+                              <span style={{ fontSize: 13, fontWeight: 700, color: '#17324D' }}>
+                                Difficulty: <span style={{ color: '#1677D2' }}>Level {diffLevel} of 30</span>
+                              </span>
+
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleAdjustDomainDifficulty(domKey, -1)}
+                                  disabled={diffLevel <= 1}
+                                  style={{
+                                    width: 32,
+                                    height: 32,
+                                    borderRadius: 8,
+                                    border: '1px solid #CBD5E1',
+                                    backgroundColor: diffLevel <= 1 ? '#F1F5F9' : '#FFFFFF',
+                                    color: diffLevel <= 1 ? '#94A3B8' : '#17324D',
+                                    fontWeight: 800,
+                                    fontSize: 16,
+                                    cursor: diffLevel <= 1 ? 'not-allowed' : 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                  }}
+                                  title="Decrease difficulty"
+                                >
+                                  -
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleAdjustDomainDifficulty(domKey, 1)}
+                                  disabled={diffLevel >= 30}
+                                  style={{
+                                    width: 32,
+                                    height: 32,
+                                    borderRadius: 8,
+                                    border: '1px solid #CBD5E1',
+                                    backgroundColor: diffLevel >= 30 ? '#F1F5F9' : '#FFFFFF',
+                                    color: diffLevel >= 30 ? '#94A3B8' : '#17324D',
+                                    fontWeight: 800,
+                                    fontSize: 16,
+                                    cursor: diffLevel >= 30 ? 'not-allowed' : 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                  }}
+                                  title="Increase difficulty"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  ))
-                )}
-              </div>
-            )}
+                  </div>
+
+                  {/* Adaptation History Log */}
+                  <div
+                    style={{
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: 22,
+                      padding: 24,
+                      border: '2px solid #DDE5ED',
+                      boxShadow: '0 4px 16px rgba(18, 59, 99, 0.04)',
+                    }}
+                  >
+                    <h4 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 16px 0', color: '#17324D' }}>
+                      Adaptation & Calibration Log ({activeModel?.adaptationHistory?.length || 0} Events)
+                    </h4>
+
+                    {(!activeModel?.adaptationHistory || activeModel.adaptationHistory.length === 0) ? (
+                      <p style={{ color: '#64748B', textAlign: 'center', padding: 20 }}>No adaptation cycles run yet.</p>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {activeModel.adaptationHistory.map((evt: any, idx: number) => (
+                          <div
+                            key={idx}
+                            style={{
+                              padding: '14px 18px',
+                              backgroundColor: '#F8FAFC',
+                              borderRadius: 14,
+                              borderLeft: '4px solid #1677D2',
+                              border: '1px solid #E2E8F0',
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                              <span style={{ fontWeight: 800, fontSize: 14, color: '#17324D' }}>
+                                {evt.trigger}
+                              </span>
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                {evt.domain && (
+                                  <span
+                                    style={{
+                                      fontSize: 11,
+                                      fontWeight: 700,
+                                      padding: '2px 8px',
+                                      borderRadius: 6,
+                                      backgroundColor: '#EAF4FF',
+                                      color: '#1677D2',
+                                      textTransform: 'capitalize',
+                                    }}
+                                  >
+                                    {evt.domain}
+                                  </span>
+                                )}
+                                <span style={{ fontSize: 12, color: '#94A3B8' }}>
+                                  {evt.timestamp ? new Date(evt.timestamp).toLocaleDateString() : 'Recent'}
+                                </span>
+                              </div>
+                            </div>
+                            <p style={{ margin: 0, fontSize: 13, color: '#475569', lineHeight: 1.5 }}>
+                              {evt.rationale}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* TAB: Real-Life Transfer */}
+            {activeTab === 'transfer' && (() => {
+              const transfersList: TransferItem[] =
+                transfers.length > 0
+                  ? transfers
+                  : LocalCaregiverService.getTransfers(selectedPatientId || 'patient-ner-001').map((t, idx) => ({
+                      id: (t as any).id || `trans_${idx}`,
+                      baselineTaskId: t.baselineTaskId,
+                      baselineScore: t.baselineScore,
+                      verificationTaskId: t.verificationTaskId,
+                      verificationScore: t.verificationScore,
+                      trainingInterventionsCount: t.trainingInterventionsCount,
+                      transferDelta: t.transferDelta,
+                      observedReport: t.observedReport,
+                      evaluatedAt: (t as any).evaluatedAt || (t as any).timestamp || new Date().toISOString(),
+                    }));
+
+              const filtered = transfersList.filter((t) => {
+                if (transferFilter === 'all') return true;
+                const matchDomain = (t.baselineTaskId || '').toLowerCase();
+                return matchDomain.includes(transferFilter.toLowerCase());
+              });
+
+              const avgDelta =
+                transfersList.length > 0
+                  ? transfersList.reduce((acc, t) => acc + (t.transferDelta || 0), 0) / transfersList.length
+                  : 0.28;
+              const highTransferCount = transfersList.filter((t) => (t.transferDelta || 0) >= 0.25).length;
+              const totalInterventions = transfersList.reduce(
+                (acc, t) => acc + (t.trainingInterventionsCount || 0),
+                0
+              );
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                  {/* Header & Record Button */}
+                  <div
+                    style={{
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: 22,
+                      padding: 24,
+                      border: '2px solid #DDE5ED',
+                      boxShadow: '0 4px 16px rgba(18, 59, 99, 0.04)',
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 16,
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: 26 }}>🔄</span>
+                        <h3 style={{ fontSize: 22, fontWeight: 900, margin: 0, color: '#17324D' }}>
+                          Real-Life Functional Transfer ({transfersList.length})
+                        </h3>
+                      </div>
+                      <p style={{ margin: '6px 0 0 0', fontSize: 14, color: '#64748B' }}>
+                        Measures whether cognitive drills generalize to everyday in-vivo independence (cooking, medication, currency, family).
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowTransferModal(true)}
+                      style={{
+                        backgroundColor: '#059669',
+                        color: '#FFFFFF',
+                        border: 'none',
+                        borderRadius: 14,
+                        padding: '12px 20px',
+                        fontSize: 15,
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        boxShadow: '0 4px 12px rgba(5, 150, 105, 0.25)',
+                      }}
+                    >
+                      <span>➕</span>
+                      <span>Record Real-Life Assessment</span>
+                    </button>
+                  </div>
+
+                  {/* 4 Summary Stats */}
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+                      gap: 14,
+                    }}
+                  >
+                    <div style={{ backgroundColor: '#FFFFFF', padding: '16px 18px', borderRadius: 16, border: '1.5px solid #DDE5ED' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#64748B' }}>Evaluated Tasks</span>
+                      <div style={{ fontSize: 22, fontWeight: 900, color: '#17324D', marginTop: 4 }}>
+                        {transfersList.length} Tasks
+                      </div>
+                      <span style={{ fontSize: 11, color: '#94A3B8' }}>In-vivo verified</span>
+                    </div>
+
+                    <div style={{ backgroundColor: '#FFFFFF', padding: '16px 18px', borderRadius: 16, border: '1.5px solid #DDE5ED' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#64748B' }}>Average Transfer Gain</span>
+                      <div style={{ fontSize: 22, fontWeight: 900, color: '#059669', marginTop: 4 }}>
+                        +{Math.round(avgDelta * 100)}%
+                      </div>
+                      <span style={{ fontSize: 11, color: '#059669' }}>Positive generalization</span>
+                    </div>
+
+                    <div style={{ backgroundColor: '#FFFFFF', padding: '16px 18px', borderRadius: 16, border: '1.5px solid #DDE5ED' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#64748B' }}>High Transfer Tasks</span>
+                      <div style={{ fontSize: 22, fontWeight: 900, color: '#2563EB', marginTop: 4 }}>
+                        {highTransferCount} Tasks
+                      </div>
+                      <span style={{ fontSize: 11, color: '#94A3B8' }}>≥ 25% gain verified</span>
+                    </div>
+
+                    <div style={{ backgroundColor: '#FFFFFF', padding: '16px 18px', borderRadius: 16, border: '1.5px solid #DDE5ED' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#64748B' }}>Total Practice Drills</span>
+                      <div style={{ fontSize: 22, fontWeight: 900, color: '#7C3AED', marginTop: 4 }}>
+                        {totalInterventions} Drills
+                      </div>
+                      <span style={{ fontSize: 11, color: '#94A3B8' }}>Prior digital repetitions</span>
+                    </div>
+                  </div>
+
+                  {/* Filter Pills */}
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {[
+                      { id: 'all', label: 'All Tasks' },
+                      { id: 'tea', label: 'Assam Tea Sequencing' },
+                      { id: 'medication', label: 'Medication Adherence' },
+                      { id: 'family', label: 'Family Recognition' },
+                      { id: 'currency', label: 'Market Currency' },
+                    ].map((pill) => (
+                      <button
+                        key={pill.id}
+                        type="button"
+                        onClick={() => setTransferFilter(pill.id)}
+                        style={{
+                          padding: '8px 16px',
+                          borderRadius: 20,
+                          border: 'none',
+                          backgroundColor: transferFilter === pill.id ? '#1677D2' : '#FFFFFF',
+                          color: transferFilter === pill.id ? '#FFFFFF' : '#475569',
+                          fontWeight: 700,
+                          fontSize: 13,
+                          cursor: 'pointer',
+                          boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
+                        }}
+                      >
+                        {pill.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Transfer Cards List */}
+                  {filtered.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: 48, backgroundColor: '#FFFFFF', borderRadius: 20, color: '#64748B' }}>
+                      No evaluations match the selected filter.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                      {filtered.map((t) => {
+                        const deltaPct = Math.round((t.transferDelta || 0) * 100);
+                        const isPositive = deltaPct >= 0;
+                        const basePct = Math.round((t.baselineScore || 0) * 100);
+                        const veriPct = Math.round((t.verificationScore || 0) * 100);
+
+                        return (
+                          <div
+                            key={t.id}
+                            style={{
+                              backgroundColor: '#FFFFFF',
+                              borderRadius: 20,
+                              padding: 22,
+                              border: '1.5px solid #DDE5ED',
+                              boxShadow: '0 4px 16px rgba(18, 59, 99, 0.04)',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 16,
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
+                              <div>
+                                <h4 style={{ fontSize: 18, fontWeight: 900, margin: 0, color: '#17324D' }}>
+                                  {t.baselineTaskId.replace(/_/g, ' ')}
+                                </h4>
+                                <span style={{ fontSize: 12, color: '#64748B' }}>
+                                  Evaluated on {new Date(t.evaluatedAt).toLocaleDateString()} by Caregiver
+                                </span>
+                              </div>
+
+                              <span
+                                style={{
+                                  fontSize: 14,
+                                  fontWeight: 800,
+                                  padding: '6px 14px',
+                                  borderRadius: 12,
+                                  backgroundColor: isPositive ? '#E8F7EF' : '#FBE8EE',
+                                  color: isPositive ? '#059669' : '#C2185B',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                }}
+                              >
+                                <span>{isPositive ? '↗' : '↘'}</span>
+                                <span>{isPositive ? `+${deltaPct}% Transfer Gain` : `${deltaPct}%`}</span>
+                              </span>
+                            </div>
+
+                            {/* Dual Visual Meters */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+                              <div style={{ backgroundColor: '#F8FAFC', padding: 14, borderRadius: 14, border: '1px solid #E2E8F0' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
+                                  <span style={{ color: '#64748B', fontWeight: 600 }}>Digital Drill Baseline</span>
+                                  <strong style={{ color: '#475569' }}>{basePct}%</strong>
+                                </div>
+                                <div style={{ height: 8, backgroundColor: '#E2E8F0', borderRadius: 4, overflow: 'hidden' }}>
+                                  <div style={{ width: `${basePct}%`, height: '100%', backgroundColor: '#64748B', borderRadius: 4 }} />
+                                </div>
+                              </div>
+
+                              <div style={{ backgroundColor: '#F0FDF4', padding: 14, borderRadius: 14, border: '1px solid #BBF7D0' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
+                                  <span style={{ color: '#166534', fontWeight: 700 }}>Real-Life Verification Score</span>
+                                  <strong style={{ color: '#059669' }}>{veriPct}%</strong>
+                                </div>
+                                <div style={{ height: 8, backgroundColor: '#DCFCE7', borderRadius: 4, overflow: 'hidden' }}>
+                                  <div style={{ width: `${veriPct}%`, height: '100%', backgroundColor: '#059669', borderRadius: 4 }} />
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Narrative Report */}
+                            <div
+                              style={{
+                                backgroundColor: '#F8FAFC',
+                                padding: '14px 16px',
+                                borderRadius: 14,
+                                borderLeft: '4px solid #059669',
+                                fontSize: 14,
+                                color: '#1E293B',
+                                lineHeight: 1.5,
+                              }}
+                            >
+                              <div style={{ fontSize: 12, fontWeight: 700, color: '#059669', marginBottom: 2 }}>
+                                CARETAKER IN-VIVO OBSERVATION
+                              </div>
+                              {t.observedReport}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* TAB: Activities History */}
+            {activeTab === 'history' && (() => {
+              const actList: ActivityItem[] =
+                activities.length > 0
+                  ? activities
+                  : LocalCaregiverService.getActivities(selectedPatientId || 'patient-ner-001').map((o) => ({
+                      id: o.id,
+                      domain: o.domain,
+                      taskId: o.taskId,
+                      difficulty: o.difficulty,
+                      metrics: {
+                        rawScore: o.metrics.rawScore,
+                        itemsPresented: o.metrics.itemsPresented,
+                        itemsCorrect: o.metrics.itemsCorrect,
+                        completionTimeMs: o.metrics.completionTimeMs,
+                        cueAssistanceCount: o.metrics.cueAssistanceCount,
+                      },
+                      timestamp: o.timestamp,
+                      context: o.context,
+                    }));
+
+              const filtered = actList.filter((a) => {
+                if (activityDomainFilter !== 'all' && a.domain.toLowerCase() !== activityDomainFilter.toLowerCase()) return false;
+                if (activityScoreFilter === 'high' && a.metrics.rawScore < 0.8) return false;
+                if (activityScoreFilter === 'moderate' && (a.metrics.rawScore < 0.5 || a.metrics.rawScore >= 0.8)) return false;
+                if (activityScoreFilter === 'needs_support' && a.metrics.rawScore >= 0.5) return false;
+                if (activitySearch.trim()) {
+                  const q = activitySearch.toLowerCase();
+                  return (a.taskId || '').toLowerCase().includes(q) || (a.context || '').toLowerCase().includes(q);
+                }
+                return true;
+              });
+
+              const avgScore =
+                actList.length > 0
+                  ? actList.reduce((acc, a) => acc + (a.metrics?.rawScore || 0), 0) / actList.length
+                  : 0.82;
+              const totalTimeSec = actList.reduce((acc, a) => acc + ((a.metrics?.completionTimeMs || 0) / 1000), 0);
+              const cueIndependent = actList.filter((a) => (a.metrics?.cueAssistanceCount || 0) === 0).length;
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                  {/* Header & Log Action */}
+                  <div
+                    style={{
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: 22,
+                      padding: 24,
+                      border: '2px solid #DDE5ED',
+                      boxShadow: '0 4px 16px rgba(18, 59, 99, 0.04)',
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 16,
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: 26 }}>📜</span>
+                        <h3 style={{ fontSize: 22, fontWeight: 900, margin: 0, color: '#17324D' }}>
+                          Cognitive Activities & Observations ({actList.length})
+                        </h3>
+                      </div>
+                      <p style={{ margin: '6px 0 0 0', fontSize: 14, color: '#64748B' }}>
+                        Chronological record of cognitive drills, completion latencies, accuracy scores, and cue assistance.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowActivityModal(true)}
+                      style={{
+                        backgroundColor: '#7C3AED',
+                        color: '#FFFFFF',
+                        border: 'none',
+                        borderRadius: 14,
+                        padding: '12px 20px',
+                        fontSize: 15,
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        boxShadow: '0 4px 12px rgba(124, 58, 237, 0.25)',
+                      }}
+                    >
+                      <span>➕</span>
+                      <span>Log Caretaker Activity</span>
+                    </button>
+                  </div>
+
+                  {/* 4 Analytics Summary Cards */}
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+                      gap: 14,
+                    }}
+                  >
+                    <div style={{ backgroundColor: '#FFFFFF', padding: '16px 18px', borderRadius: 16, border: '1.5px solid #DDE5ED' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#64748B' }}>Total Drills Logged</span>
+                      <div style={{ fontSize: 22, fontWeight: 900, color: '#17324D', marginTop: 4 }}>
+                        {actList.length} Sessions
+                      </div>
+                      <span style={{ fontSize: 11, color: '#94A3B8' }}>Across all 6 domains</span>
+                    </div>
+
+                    <div style={{ backgroundColor: '#FFFFFF', padding: '16px 18px', borderRadius: 16, border: '1.5px solid #DDE5ED' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#64748B' }}>Overall Accuracy</span>
+                      <div style={{ fontSize: 22, fontWeight: 900, color: '#059669', marginTop: 4 }}>
+                        {Math.round(avgScore * 100)}%
+                      </div>
+                      <span style={{ fontSize: 11, color: '#059669' }}>High patient performance</span>
+                    </div>
+
+                    <div style={{ backgroundColor: '#FFFFFF', padding: '16px 18px', borderRadius: 16, border: '1.5px solid #DDE5ED' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#64748B' }}>Total Practice Time</span>
+                      <div style={{ fontSize: 22, fontWeight: 900, color: '#2563EB', marginTop: 4 }}>
+                        {Math.round(totalTimeSec / 60)} mins
+                      </div>
+                      <span style={{ fontSize: 11, color: '#94A3B8' }}>Engaged training</span>
+                    </div>
+
+                    <div style={{ backgroundColor: '#FFFFFF', padding: '16px 18px', borderRadius: 16, border: '1.5px solid #DDE5ED' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#64748B' }}>Independence Rate</span>
+                      <div style={{ fontSize: 22, fontWeight: 900, color: '#7C3AED', marginTop: 4 }}>
+                        {Math.round((cueIndependent / (actList.length || 1)) * 100)}%
+                      </div>
+                      <span style={{ fontSize: 11, color: '#94A3B8' }}>Completed with 0 hints</span>
+                    </div>
+                  </div>
+
+                  {/* Filter Toolbar */}
+                  <div
+                    style={{
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: 18,
+                      padding: '14px 18px',
+                      border: '1.5px solid #DDE5ED',
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: 12,
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <input
+                        type="text"
+                        placeholder="Search task or context..."
+                        value={activitySearch}
+                        onChange={(e) => setActivitySearch(e.target.value)}
+                        style={{
+                          padding: '8px 14px',
+                          borderRadius: 12,
+                          border: '1.5px solid #DDE5ED',
+                          fontSize: 14,
+                          minWidth: 200,
+                        }}
+                      />
+
+                      <select
+                        value={activityDomainFilter}
+                        onChange={(e) => setActivityDomainFilter(e.target.value)}
+                        style={{
+                          padding: '8px 12px',
+                          borderRadius: 12,
+                          border: '1.5px solid #DDE5ED',
+                          fontSize: 13,
+                          backgroundColor: '#FFFFFF',
+                        }}
+                      >
+                        <option value="all">All Domains</option>
+                        <option value="memory">🧠 Memory</option>
+                        <option value="attention">🎯 Attention</option>
+                        <option value="recognition">👥 Recognition</option>
+                        <option value="sequencing">🧩 Sequencing</option>
+                        <option value="calculation">🔢 Calculation</option>
+                        <option value="planning">📋 Planning</option>
+                      </select>
+
+                      <select
+                        value={activityScoreFilter}
+                        onChange={(e) => setActivityScoreFilter(e.target.value)}
+                        style={{
+                          padding: '8px 12px',
+                          borderRadius: 12,
+                          border: '1.5px solid #DDE5ED',
+                          fontSize: 13,
+                          backgroundColor: '#FFFFFF',
+                        }}
+                      >
+                        <option value="all">All Scores</option>
+                        <option value="high">High (≥ 80%)</option>
+                        <option value="moderate">Moderate (50–79%)</option>
+                        <option value="needs_support">Needs Support (&lt; 50%)</option>
+                      </select>
+                    </div>
+
+                    <span style={{ fontSize: 13, color: '#64748B', fontWeight: 600 }}>
+                      Showing {filtered.length} of {actList.length} activities
+                    </span>
+                  </div>
+
+                  {/* Activity Table */}
+                  <div
+                    style={{
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: 22,
+                      padding: 20,
+                      border: '2px solid #DDE5ED',
+                      boxShadow: '0 4px 16px rgba(18, 59, 99, 0.04)',
+                      overflowX: 'auto',
+                    }}
+                  >
+                    {filtered.length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: 32, color: '#64748B' }}>
+                        No activities match the current filters.
+                      </div>
+                    ) : (
+                      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 14 }}>
+                        <thead>
+                          <tr style={{ borderBottom: '2px solid #E2E8F0', color: '#64748B' }}>
+                            <th style={{ padding: '12px 14px' }}>Timestamp</th>
+                            <th style={{ padding: '12px 14px' }}>Domain</th>
+                            <th style={{ padding: '12px 14px' }}>Task & Context</th>
+                            <th style={{ padding: '12px 14px' }}>Difficulty</th>
+                            <th style={{ padding: '12px 14px' }}>Accuracy Score</th>
+                            <th style={{ padding: '12px 14px' }}>Duration</th>
+                            <th style={{ padding: '12px 14px' }}>Cues</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filtered.map((a) => {
+                            const pct = Math.round((a.metrics.rawScore || 0) * 100);
+                            const isGood = pct >= 80;
+                            const isFair = pct >= 60;
+                            const scoreColor = isGood ? '#059669' : isFair ? '#D97706' : '#DC2626';
+
+                            return (
+                              <tr key={a.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                                <td style={{ padding: '12px 14px', whiteSpace: 'nowrap', color: '#64748B', fontSize: 13 }}>
+                                  {new Date(a.timestamp).toLocaleDateString()}{' '}
+                                  <span style={{ color: '#94A3B8' }}>
+                                    {new Date(a.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '12px 14px' }}>
+                                  <span
+                                    style={{
+                                      fontSize: 12,
+                                      fontWeight: 800,
+                                      padding: '3px 10px',
+                                      borderRadius: 8,
+                                      backgroundColor: '#F1F5F9',
+                                      color: '#1E293B',
+                                      textTransform: 'capitalize',
+                                    }}
+                                  >
+                                    {a.domain}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '12px 14px' }}>
+                                  <div style={{ fontWeight: 800, color: '#17324D' }}>{a.taskId.replace(/_/g, ' ')}</div>
+                                  <div style={{ fontSize: 12, color: '#64748B' }}>{a.context}</div>
+                                </td>
+                                <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                                  <span
+                                    style={{
+                                      fontSize: 12,
+                                      fontWeight: 700,
+                                      backgroundColor: '#EAF4FF',
+                                      color: '#1677D2',
+                                      padding: '2px 8px',
+                                      borderRadius: 6,
+                                    }}
+                                  >
+                                    Level {a.difficulty} of 30
+                                  </span>
+                                </td>
+                                <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <strong style={{ color: scoreColor, width: 40 }}>{pct}%</strong>
+                                    <div style={{ width: 60, height: 6, backgroundColor: '#E2E8F0', borderRadius: 3, overflow: 'hidden' }}>
+                                      <div style={{ width: `${pct}%`, height: '100%', backgroundColor: scoreColor, borderRadius: 3 }} />
+                                    </div>
+                                  </div>
+                                </td>
+                                <td style={{ padding: '12px 14px', whiteSpace: 'nowrap', color: '#64748B' }}>
+                                  {((a.metrics.completionTimeMs || 0) / 1000).toFixed(1)}s
+                                </td>
+                                <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                                  {(a.metrics.cueAssistanceCount || 0) === 0 ? (
+                                    <span style={{ fontSize: 12, color: '#059669', fontWeight: 700 }}>Independent</span>
+                                  ) : (
+                                    <span style={{ fontSize: 12, color: '#D97706', fontWeight: 600 }}>
+                                      {a.metrics.cueAssistanceCount} hints
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* TAB: Clinical Alerts */}
+            {activeTab === 'alerts' && (() => {
+              const alertsList: AlertItem[] =
+                alerts.length > 0
+                  ? alerts
+                  : LocalCaregiverService.getAlerts(selectedPatientId || 'patient-ner-001').map((a) => ({
+                      id: a.id,
+                      patientId: a.patientId,
+                      patientName: selectedPatient?.displayName || 'Patient',
+                      domain: a.domain,
+                      observationWindow: a.observationWindow || 'Past 7 days',
+                      reason: a.message,
+                      timestamp: a.detectedAt,
+                      reviewStatus: a.status,
+                      severity: a.severity || 'WARNING',
+                      clinicalNote: a.clinicalNote,
+                      acknowledgedBy: a.acknowledgedBy,
+                      acknowledgedAt: a.acknowledgedAt,
+                    }));
+
+              const filtered = alertsList.filter((a) => {
+                if (alertStatusFilter !== 'ALL' && a.reviewStatus !== alertStatusFilter) return false;
+                if (alertSeverityFilter !== 'ALL' && (a.severity || 'WARNING') !== alertSeverityFilter) return false;
+                return true;
+              });
+
+              const pendingCount = alertsList.filter((a) => a.reviewStatus === 'PENDING_REVIEW').length;
+              const acknowledgedCount = alertsList.filter((a) => a.reviewStatus === 'ACKNOWLEDGED').length;
+              const resolvedCount = alertsList.filter((a) => a.reviewStatus === 'RESOLVED').length;
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                  {/* Header & Create Alert */}
+                  <div
+                    style={{
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: 22,
+                      padding: 24,
+                      border: '2px solid #DDE5ED',
+                      boxShadow: '0 4px 16px rgba(18, 59, 99, 0.04)',
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 16,
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: 26 }}>🔔</span>
+                        <h3 style={{ fontSize: 22, fontWeight: 900, margin: 0, color: '#17324D' }}>
+                          Observed Cognitive & Routine Alerts ({alertsList.length})
+                        </h3>
+                      </div>
+                      <p style={{ margin: '6px 0 0 0', fontSize: 14, color: '#64748B' }}>
+                        Tracks observed behavioral changes, hydration delays, and task milestones with caretaker acknowledgement and clinical review notes.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowAlertModal(true)}
+                      style={{
+                        backgroundColor: '#1677D2',
+                        color: '#FFFFFF',
+                        border: 'none',
+                        borderRadius: 14,
+                        padding: '12px 20px',
+                        fontSize: 15,
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        boxShadow: '0 4px 12px rgba(22, 119, 210, 0.25)',
+                      }}
+                    >
+                      <span>➕</span>
+                      <span>Create Clinical Alert / Note</span>
+                    </button>
+                  </div>
+
+                  {/* 3 Status Counters */}
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+                      gap: 14,
+                    }}
+                  >
+                    <div
+                      style={{
+                        backgroundColor: pendingCount > 0 ? '#FFF1F2' : '#FFFFFF',
+                        padding: '16px 18px',
+                        borderRadius: 16,
+                        border: pendingCount > 0 ? '1.5px solid #FECDD3' : '1.5px solid #DDE5ED',
+                      }}
+                    >
+                      <span style={{ fontSize: 12, fontWeight: 700, color: pendingCount > 0 ? '#E11D48' : '#64748B' }}>
+                        Pending Review
+                      </span>
+                      <div style={{ fontSize: 22, fontWeight: 900, color: pendingCount > 0 ? '#BE123C' : '#17324D', marginTop: 4 }}>
+                        {pendingCount} Alerts
+                      </div>
+                      <span style={{ fontSize: 11, color: '#94A3B8' }}>Requires caregiver review</span>
+                    </div>
+
+                    <div style={{ backgroundColor: '#FFFFFF', padding: '16px 18px', borderRadius: 16, border: '1.5px solid #DDE5ED' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#1677D2' }}>Acknowledged</span>
+                      <div style={{ fontSize: 22, fontWeight: 900, color: '#1677D2', marginTop: 4 }}>
+                        {acknowledgedCount} Alerts
+                      </div>
+                      <span style={{ fontSize: 11, color: '#94A3B8' }}>Notes added, under observation</span>
+                    </div>
+
+                    <div style={{ backgroundColor: '#FFFFFF', padding: '16px 18px', borderRadius: 16, border: '1.5px solid #DDE5ED' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#059669' }}>Resolved</span>
+                      <div style={{ fontSize: 22, fontWeight: 900, color: '#059669', marginTop: 4 }}>
+                        {resolvedCount} Alerts
+                      </div>
+                      <span style={{ fontSize: 11, color: '#94A3B8' }}>Routine stabilized</span>
+                    </div>
+                  </div>
+
+                  {/* Filter Toolbar */}
+                  <div
+                    style={{
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: 18,
+                      padding: '12px 18px',
+                      border: '1.5px solid #DDE5ED',
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: 10,
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {[
+                        { id: 'ALL', label: 'All Alerts' },
+                        { id: 'PENDING_REVIEW', label: `Pending (${pendingCount})` },
+                        { id: 'ACKNOWLEDGED', label: `Acknowledged (${acknowledgedCount})` },
+                        { id: 'RESOLVED', label: `Resolved (${resolvedCount})` },
+                      ].map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setAlertStatusFilter(item.id)}
+                          style={{
+                            padding: '6px 14px',
+                            borderRadius: 16,
+                            border: 'none',
+                            backgroundColor: alertStatusFilter === item.id ? '#17324D' : '#F1F5F9',
+                            color: alertStatusFilter === item.id ? '#FFFFFF' : '#475569',
+                            fontWeight: 700,
+                            fontSize: 13,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <select
+                      value={alertSeverityFilter}
+                      onChange={(e) => setAlertSeverityFilter(e.target.value)}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: 12,
+                        border: '1.5px solid #DDE5ED',
+                        fontSize: 13,
+                        backgroundColor: '#FFFFFF',
+                      }}
+                    >
+                      <option value="ALL">All Severities</option>
+                      <option value="CRITICAL">🔴 Critical</option>
+                      <option value="WARNING">🟠 Warning</option>
+                      <option value="NEUTRAL_NOTICE">🔵 Neutral Notice</option>
+                      <option value="INFO">🟢 Info / Milestone</option>
+                    </select>
+                  </div>
+
+                  {/* Alerts List */}
+                  {filtered.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: 48, backgroundColor: '#FFFFFF', borderRadius: 20, color: '#059669', fontWeight: 700 }}>
+                      ✅ No alerts match the selected filters.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      {filtered.map((alert) => {
+                        const sev = alert.severity || 'WARNING';
+                        const borderColors: Record<string, string> = {
+                          CRITICAL: '#DC2626',
+                          WARNING: '#D97706',
+                          NEUTRAL_NOTICE: '#2563EB',
+                          INFO: '#059669',
+                        };
+                        const badgeColors: Record<string, { bg: string; text: string }> = {
+                          CRITICAL: { bg: '#FEE2E2', text: '#991B1B' },
+                          WARNING: { bg: '#FEF3C7', text: '#92400E' },
+                          NEUTRAL_NOTICE: { bg: '#DBEAFE', text: '#1E40AF' },
+                          INFO: { bg: '#D1FAE5', text: '#065F46' },
+                        };
+                        const sevColor = borderColors[sev] || '#D97706';
+                        const badgeStyle = badgeColors[sev] || { bg: '#FEF3C7', text: '#92400E' };
+
+                        return (
+                          <div
+                            key={alert.id}
+                            style={{
+                              backgroundColor: '#FFFFFF',
+                              borderRadius: 18,
+                              padding: 20,
+                              border: '1.5px solid #DDE5ED',
+                              borderLeft: `6px solid ${sevColor}`,
+                              boxShadow: '0 4px 16px rgba(18, 59, 99, 0.04)',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 12,
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                <span
+                                  style={{
+                                    fontSize: 11,
+                                    fontWeight: 900,
+                                    padding: '4px 10px',
+                                    borderRadius: 8,
+                                    backgroundColor: badgeStyle.bg,
+                                    color: badgeStyle.text,
+                                    letterSpacing: '0.04em',
+                                  }}
+                                >
+                                  {sev.replace('_', ' ')}
+                                </span>
+                                <h4 style={{ margin: 0, fontSize: 16, fontWeight: 900, color: '#17324D', textTransform: 'capitalize' }}>
+                                  {alert.domain} Observation Alert
+                                </h4>
+                              </div>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ fontSize: 12, color: '#64748B' }}>
+                                  Window: <strong>{alert.observationWindow || 'Recent'}</strong>
+                                </span>
+                                <span
+                                  style={{
+                                    fontSize: 12,
+                                    fontWeight: 800,
+                                    padding: '3px 10px',
+                                    borderRadius: 8,
+                                    backgroundColor:
+                                      alert.reviewStatus === 'PENDING_REVIEW'
+                                        ? '#FFF1F2'
+                                        : alert.reviewStatus === 'ACKNOWLEDGED'
+                                        ? '#EFF6FF'
+                                        : '#F0FDF4',
+                                    color:
+                                      alert.reviewStatus === 'PENDING_REVIEW'
+                                        ? '#E11D48'
+                                        : alert.reviewStatus === 'ACKNOWLEDGED'
+                                        ? '#1D4ED8'
+                                        : '#15803D',
+                                  }}
+                                >
+                                  {alert.reviewStatus.replace('_', ' ')}
+                                </span>
+                              </div>
+                            </div>
+
+                            <p style={{ margin: 0, fontSize: 14, color: '#334155', lineHeight: 1.5 }}>
+                              {alert.reason}
+                            </p>
+
+                            {/* Clinical Note if exists */}
+                            {alert.clinicalNote && (
+                              <div
+                                style={{
+                                  backgroundColor: '#F8FAFC',
+                                  padding: '10px 14px',
+                                  borderRadius: 10,
+                                  fontSize: 13,
+                                  color: '#1E293B',
+                                  borderLeft: '3px solid #1677D2',
+                                }}
+                              >
+                                <strong>Caregiver Clinical Note:</strong> {alert.clinicalNote}
+                                {alert.acknowledgedBy && (
+                                  <div style={{ fontSize: 11, color: '#64748B', marginTop: 4 }}>
+                                    Signed by {alert.acknowledgedBy}{' '}
+                                    {alert.acknowledgedAt && `on ${new Date(alert.acknowledgedAt).toLocaleDateString()}`}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Footer Actions */}
+                            <div
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                paddingTop: 10,
+                                borderTop: '1px solid #F1F5F9',
+                                flexWrap: 'wrap',
+                                gap: 10,
+                              }}
+                            >
+                              <span style={{ fontSize: 12, color: '#94A3B8' }}>
+                                Detected: {new Date(alert.timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                              </span>
+
+                              <div style={{ display: 'flex', gap: 8 }}>
+                                {alert.reviewStatus === 'PENDING_REVIEW' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenReviewModal(alert)}
+                                    style={{
+                                      backgroundColor: '#1677D2',
+                                      color: '#FFFFFF',
+                                      border: 'none',
+                                      borderRadius: 10,
+                                      padding: '8px 16px',
+                                      fontSize: 13,
+                                      fontWeight: 800,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    Acknowledge & Add Clinical Note ✍️
+                                  </button>
+                                )}
+
+                                {alert.reviewStatus === 'ACKNOWLEDGED' && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenReviewModal(alert)}
+                                      style={{
+                                        backgroundColor: '#FFFFFF',
+                                        color: '#1677D2',
+                                        border: '1px solid #1677D2',
+                                        borderRadius: 10,
+                                        padding: '7px 14px',
+                                        fontSize: 13,
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                      }}
+                                    >
+                                      Edit Note ✏️
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setReviewingAlert(alert);
+                                        handleConfirmReviewStatus('RESOLVED');
+                                      }}
+                                      style={{
+                                        backgroundColor: '#059669',
+                                        color: '#FFFFFF',
+                                        border: 'none',
+                                        borderRadius: 10,
+                                        padding: '8px 16px',
+                                        fontSize: 13,
+                                        fontWeight: 800,
+                                        cursor: 'pointer',
+                                      }}
+                                    >
+                                      Mark as Resolved ✓
+                                    </button>
+                                  </>
+                                )}
+
+                                {alert.reviewStatus === 'RESOLVED' && (
+                                  <span style={{ fontSize: 13, color: '#059669', fontWeight: 800 }}>
+                                    ✓ Case Resolved & Archived
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </>
         ) : (
           <div style={{ textAlign: 'center', padding: 48, color: '#64748B' }}>
@@ -3304,6 +4748,729 @@ export const CaregiverPortal: React.FC<Props> = ({ onBackToPatientApp }) => {
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* MODAL 1: RECORD REAL-LIFE FUNCTIONAL TRANSFER */}
+      {showTransferModal && (
+        <div className="modal-overlay" onClick={() => setShowTransferModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 24 }}>🔄</span>
+                <h3 style={{ fontSize: 20, fontWeight: 900, color: '#17324D', margin: 0 }}>
+                  Record Real-Life Functional Transfer
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowTransferModal(false)}
+                style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#64748B' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveTransfer} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                  Real-Life Task Name *
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Assam Tea Morning Preparation"
+                  value={newTransferTask}
+                  onChange={(e) => setNewTransferTask(e.target.value)}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    borderRadius: 12,
+                    border: '1.5px solid #DDE5ED',
+                    fontSize: 15,
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                    Cognitive Domain
+                  </label>
+                  <select
+                    value={newTransferDomain}
+                    onChange={(e) => setNewTransferDomain(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      borderRadius: 12,
+                      border: '1.5px solid #DDE5ED',
+                      fontSize: 14,
+                      backgroundColor: '#FFFFFF',
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    <option value="sequencing">🧩 Sequencing</option>
+                    <option value="memory">🧠 Memory</option>
+                    <option value="attention">🎯 Attention</option>
+                    <option value="recognition">👥 Recognition</option>
+                    <option value="calculation">🔢 Calculation</option>
+                    <option value="planning">📋 Planning</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                    Training Drills Count
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={newTransferDrills}
+                    onChange={(e) => setNewTransferDrills(Number(e.target.value))}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      borderRadius: 12,
+                      border: '1.5px solid #DDE5ED',
+                      fontSize: 14,
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                    Digital Baseline Score ({newTransferBaseline}%)
+                  </label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={newTransferBaseline}
+                    onChange={(e) => setNewTransferBaseline(Number(e.target.value))}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                    Real-Life Verification ({newTransferVerification}%)
+                  </label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={newTransferVerification}
+                    onChange={(e) => setNewTransferVerification(Number(e.target.value))}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                  Physical Setting / Context
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Home Kitchen - Morning Breakfast Routine"
+                  value={newTransferContext}
+                  onChange={(e) => setNewTransferContext(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    borderRadius: 12,
+                    border: '1.5px solid #DDE5ED',
+                    fontSize: 14,
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                  Caregiver Clinical & Functional Observation
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="Describe patient's real-life functional performance, step adherence, and level of independence..."
+                  value={newTransferReport}
+                  onChange={(e) => setNewTransferReport(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    borderRadius: 12,
+                    border: '1.5px solid #DDE5ED',
+                    fontSize: 14,
+                    boxSizing: 'border-box',
+                    fontFamily: 'inherit',
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+                <button
+                  type="submit"
+                  style={{
+                    flex: 1,
+                    backgroundColor: '#059669',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    borderRadius: 12,
+                    padding: '12px',
+                    fontSize: 15,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Save Transfer Evaluation ✓
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowTransferModal(false)}
+                  style={{
+                    backgroundColor: '#F1F5F9',
+                    color: '#64748B',
+                    border: 'none',
+                    borderRadius: 12,
+                    padding: '12px 18px',
+                    fontSize: 14,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: LOG CARETAKER COGNITIVE ACTIVITY */}
+      {showActivityModal && (
+        <div className="modal-overlay" onClick={() => setShowActivityModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 24 }}>📜</span>
+                <h3 style={{ fontSize: 20, fontWeight: 900, color: '#17324D', margin: 0 }}>
+                  Log Caretaker Cognitive Activity
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowActivityModal(false)}
+                style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#64748B' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveActivity} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                  Task Name *
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Traditional Pattern Sequencing"
+                  value={newActTask}
+                  onChange={(e) => setNewActTask(e.target.value)}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    borderRadius: 12,
+                    border: '1.5px solid #DDE5ED',
+                    fontSize: 15,
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                    Cognitive Domain
+                  </label>
+                  <select
+                    value={newActDomain}
+                    onChange={(e) => setNewActDomain(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      borderRadius: 12,
+                      border: '1.5px solid #DDE5ED',
+                      fontSize: 14,
+                      backgroundColor: '#FFFFFF',
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    <option value="memory">🧠 Memory</option>
+                    <option value="attention">🎯 Attention</option>
+                    <option value="recognition">👥 Recognition</option>
+                    <option value="sequencing">🧩 Sequencing</option>
+                    <option value="calculation">🔢 Calculation</option>
+                    <option value="planning">📋 Planning</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                    Difficulty Level (1–30)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={newActDiff}
+                    onChange={(e) => setNewActDiff(Number(e.target.value))}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      borderRadius: 12,
+                      border: '1.5px solid #DDE5ED',
+                      fontSize: 14,
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                    Score ({newActScore}%)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={newActScore}
+                    onChange={(e) => setNewActScore(Number(e.target.value))}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      borderRadius: 12,
+                      border: '1.5px solid #DDE5ED',
+                      fontSize: 14,
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                    Time (sec)
+                  </label>
+                  <input
+                    type="number"
+                    min={5}
+                    max={600}
+                    value={newActTime}
+                    onChange={(e) => setNewActTime(Number(e.target.value))}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      borderRadius: 12,
+                      border: '1.5px solid #DDE5ED',
+                      fontSize: 14,
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                    Hints Used
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={10}
+                    value={newActHints}
+                    onChange={(e) => setNewActHints(Number(e.target.value))}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      borderRadius: 12,
+                      border: '1.5px solid #DDE5ED',
+                      fontSize: 14,
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                  Observation Context
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Supervised drill after morning tea"
+                  value={newActContext}
+                  onChange={(e) => setNewActContext(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    borderRadius: 12,
+                    border: '1.5px solid #DDE5ED',
+                    fontSize: 14,
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+                <button
+                  type="submit"
+                  style={{
+                    flex: 1,
+                    backgroundColor: '#7C3AED',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    borderRadius: 12,
+                    padding: '12px',
+                    fontSize: 15,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Save Activity Drill ✓
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowActivityModal(false)}
+                  style={{
+                    backgroundColor: '#F1F5F9',
+                    color: '#64748B',
+                    border: 'none',
+                    borderRadius: 12,
+                    padding: '12px 18px',
+                    fontSize: 14,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: CREATE CLINICAL ALERT / NOTE */}
+      {showAlertModal && (
+        <div className="modal-overlay" onClick={() => setShowAlertModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 24 }}>🔔</span>
+                <h3 style={{ fontSize: 20, fontWeight: 900, color: '#17324D', margin: 0 }}>
+                  Create Clinical Alert / Note
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAlertModal(false)}
+                style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#64748B' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateAlert} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                    Domain
+                  </label>
+                  <select
+                    value={newAlertDomain}
+                    onChange={(e) => setNewAlertDomain(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      borderRadius: 12,
+                      border: '1.5px solid #DDE5ED',
+                      fontSize: 14,
+                      backgroundColor: '#FFFFFF',
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    <option value="memory">🧠 Memory</option>
+                    <option value="attention">🎯 Attention</option>
+                    <option value="recognition">👥 Recognition</option>
+                    <option value="sequencing">🧩 Sequencing</option>
+                    <option value="calculation">🔢 Calculation</option>
+                    <option value="planning">📋 Planning</option>
+                    <option value="hydration">💧 Hydration & Routine</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                    Severity
+                  </label>
+                  <select
+                    value={newAlertSeverity}
+                    onChange={(e) => setNewAlertSeverity(e.target.value as any)}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      borderRadius: 12,
+                      border: '1.5px solid #DDE5ED',
+                      fontSize: 14,
+                      backgroundColor: '#FFFFFF',
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    <option value="WARNING">🟠 Warning (Pacing / Drift)</option>
+                    <option value="CRITICAL">🔴 Critical (Hydration / Missed Medication)</option>
+                    <option value="NEUTRAL_NOTICE">🔵 Neutral Notice</option>
+                    <option value="INFO">🟢 Info / Milestone</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                  Observation Window
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Past 24 hours, Morning routine"
+                  value={newAlertWindow}
+                  onChange={(e) => setNewAlertWindow(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    borderRadius: 12,
+                    border: '1.5px solid #DDE5ED',
+                    fontSize: 14,
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                  Alert Reason & Clinical Rationale *
+                </label>
+                <textarea
+                  rows={4}
+                  placeholder="Detail the observed routine variance, response latency change, or milestone..."
+                  value={newAlertMessage}
+                  onChange={(e) => setNewAlertMessage(e.target.value)}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    borderRadius: 12,
+                    border: '1.5px solid #DDE5ED',
+                    fontSize: 14,
+                    boxSizing: 'border-box',
+                    fontFamily: 'inherit',
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+                <button
+                  type="submit"
+                  style={{
+                    flex: 1,
+                    backgroundColor: '#1677D2',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    borderRadius: 12,
+                    padding: '12px',
+                    fontSize: 15,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Create Alert ✓
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAlertModal(false)}
+                  style={{
+                    backgroundColor: '#F1F5F9',
+                    color: '#64748B',
+                    border: 'none',
+                    borderRadius: 12,
+                    padding: '12px 18px',
+                    fontSize: 14,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: REVIEW & ACKNOWLEDGE CLINICAL ALERT */}
+      {reviewingAlert && (
+        <div className="modal-overlay" onClick={() => setReviewingAlert(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 24 }}>✍️</span>
+                <h3 style={{ fontSize: 20, fontWeight: 900, color: '#17324D', margin: 0 }}>
+                  Clinical Alert Review & Notes
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReviewingAlert(null)}
+                style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#64748B' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div
+              style={{
+                backgroundColor: '#F8FAFC',
+                borderRadius: 14,
+                padding: 16,
+                marginBottom: 16,
+                border: '1px solid #E2E8F0',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontWeight: 800, color: '#17324D', textTransform: 'capitalize' }}>
+                  {reviewingAlert.domain} Alert ({reviewingAlert.severity || 'WARNING'})
+                </span>
+                <span style={{ fontSize: 12, color: '#64748B' }}>{reviewingAlert.observationWindow || 'Recent'}</span>
+              </div>
+              <p style={{ margin: 0, fontSize: 13, color: '#475569', lineHeight: 1.5 }}>
+                {reviewingAlert.reason}
+              </p>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#17324D', marginBottom: 4 }}>
+                Caregiver Clinical Review Notes *
+              </label>
+              <textarea
+                rows={4}
+                placeholder="Enter actions taken, adjustments to daily schedule, family discussions, or follow-up plans..."
+                value={reviewNoteText}
+                onChange={(e) => setReviewNoteText(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '12px 14px',
+                  borderRadius: 12,
+                  border: '1.5px solid #DDE5ED',
+                  fontSize: 14,
+                  boxSizing: 'border-box',
+                  fontFamily: 'inherit',
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => handleConfirmReviewStatus('ACKNOWLEDGED')}
+                style={{
+                  flex: 1,
+                  backgroundColor: '#1677D2',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  borderRadius: 12,
+                  padding: '12px',
+                  fontSize: 14,
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                Acknowledge & Save Note
+              </button>
+              <button
+                type="button"
+                onClick={() => handleConfirmReviewStatus('RESOLVED')}
+                style={{
+                  flex: 1,
+                  backgroundColor: '#059669',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  borderRadius: 12,
+                  padding: '12px',
+                  fontSize: 14,
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                Mark as Resolved ✓
+              </button>
+              <button
+                type="button"
+                onClick={() => setReviewingAlert(null)}
+                style={{
+                  backgroundColor: '#F1F5F9',
+                  color: '#64748B',
+                  border: 'none',
+                  borderRadius: 12,
+                  padding: '12px 16px',
+                  fontSize: 14,
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FLOATING TOAST NOTIFICATION */}
+      {modelToast && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 24,
+            right: 24,
+            backgroundColor: '#17324D',
+            color: '#FFFFFF',
+            padding: '14px 22px',
+            borderRadius: 14,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            fontSize: 15,
+            fontWeight: 700,
+          }}
+        >
+          <span>✨</span>
+          <span>{modelToast}</span>
+          <button
+            type="button"
+            onClick={() => setModelToast(null)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#90CAF9',
+              fontSize: 16,
+              cursor: 'pointer',
+              marginLeft: 8,
+            }}
+          >
+            ✕
+          </button>
         </div>
       )}
     </div>

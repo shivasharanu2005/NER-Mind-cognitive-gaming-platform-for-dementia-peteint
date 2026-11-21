@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { SpeechService, SupportedAppLanguage } from '../../audio/speechService.js';
 import { useLocalization } from '../../localization/index.js';
 import { XIcon } from '../common/Icons.js';
+import { EmergencyAlertService } from '../../services/EmergencyAlertService.js';
 
 interface EmergencySimulatorModalProps {
   isOpen: boolean;
@@ -94,8 +95,10 @@ export const EmergencySimulatorModal: React.FC<EmergencySimulatorModalProps> = (
 
   const handleTriggerEmergencyAlert = () => {
     setAlertSent(true);
-    const msg = `Emergency simulator alert activated for ${patientName}. Caregiver notified for peace of mind. Please remain seated comfortably.`;
-    SpeechService.speak(msg, 0.85, (language as SupportedAppLanguage) || 'en');
+    EmergencyAlertService.triggerEmergencyAlert({
+      patientName,
+      reason: `Patient triggered SOS from Home Safety Scenario: ${currentScenario.title}`,
+    });
   };
 
   return (

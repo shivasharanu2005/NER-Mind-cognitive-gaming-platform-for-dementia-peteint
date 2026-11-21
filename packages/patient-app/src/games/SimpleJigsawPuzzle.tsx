@@ -1,7 +1,16 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { GameLevelManager, TOTAL_GAME_LEVELS } from "../services/GameLevelManager.js";
+import { GameLevelHeader } from "../components/common/GameLevelHeader.js";
 
 type Difficulty = 2 | 4 | 6 | 9;
+
+function getDifficultyForLevel(lvl: number): Difficulty {
+  if (lvl <= 6) return 2;  // Tier 1: 2 pieces (half split)
+  if (lvl <= 12) return 4; // Tier 2: 4 pieces (2x2 grid)
+  if (lvl <= 18) return 6; // Tier 3: 6 pieces (3x2 grid)
+  return 9;                // Tier 4 & 5: 9 pieces (3x3 grid)
+}
 
 type Piece = {
   id: number;
@@ -63,7 +72,8 @@ const shuffle = <T,>(items: T[]): T[] => {
 };
 
 export default function SimpleJigsawPuzzle() {
-  const [difficulty, setDifficulty] = useState<Difficulty>(4);
+  const [gameLevel, setGameLevel] = useState<number>(() => GameLevelManager.getGameLevel('jigsawPuzzle'));
+  const [difficulty, setDifficulty] = useState<Difficulty>(() => getDifficultyForLevel(GameLevelManager.getGameLevel('jigsawPuzzle')));
   const [pieces, setPieces] = useState<Piece[]>([]);
   const [selectedPiece, setSelectedPiece] = useState<number | null>(null);
   const [placed, setPlaced] = useState<Record<number, number>>({});
@@ -74,13 +84,41 @@ export default function SimpleJigsawPuzzle() {
   const [completedGames, setCompletedGames] = useState(0);
   const [bestMoves, setBestMoves] = useState<number | null>(null);
   const [imageLoaded, setImageLoaded] = useState(false);
-  const [currentImage, setCurrentImage] = useState<PuzzleImage>(
-    PUZZLE_IMAGES[0]
-  );
-  const [gameNumber, setGameNumber] = useState(1);
+  const [currentImage, setCurrentImage] = useState<PuzzleImage>(() => {
+    const lvl = GameLevelManager.getGameLevel('jigsawPuzzle');
+    return PUZZLE_IMAGES[(lvl - 1) % PUZZLE_IMAGES.length];
+  });
+  const [gameNumber, setGameNumber] = useState(() => GameLevelManager.getGameLevel('jigsawPuzzle'));
 
   const completionHandled = useRef(false);
   const imageHistory = useRef<number[]>([1]);
+
+  const loadPuzzleLevel = (lvl: number) => {
+    const targetDiff = getDifficultyForLevel(lvl);
+    const targetImg = PUZZLE_IMAGES[(lvl - 1) % PUZZLE_IMAGES.length];
+    setGameLevel(lvl);
+    setCurrentImage(targetImg);
+    setGameNumber(lvl);
+    GameLevelManager.saveGameLevel('jigsawPuzzle', lvl);
+
+    const newPieces: Piece[] = Array.from(
+      { length: targetDiff },
+      (_, index) => ({
+        id: index,
+        correctPosition: index,
+      })
+    );
+
+    setDifficulty(targetDiff);
+    setPieces(shuffle(newPieces));
+    setPlaced({});
+    setSelectedPiece(null);
+    setMoves(0);
+    setPreview(lvl < 25); // Ghost preview on up to level 24, Level 25+ mastery challenge
+    setShowHint(false);
+    setImageLoaded(false);
+    completionHandled.current = false;
+  };
 
   const columns = difficulty === 2 || difficulty === 4 ? 2 : 3;
   const rows = Math.ceil(difficulty / columns);
@@ -144,8 +182,7 @@ export default function SimpleJigsawPuzzle() {
   };
 
   useEffect(() => {
-    startGame(4);
-    // Initialize the first puzzle.
+    loadPuzzleLevel(gameLevel);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -227,13 +264,14 @@ export default function SimpleJigsawPuzzle() {
     setCompletedGames(newCompleted);
     setBestMoves(newBest);
 
-    announce("Wonderful! You completed the puzzle. Well done!");
+    GameLevelManager.completeLevel('jigsawPuzzle', gameLevel, 100);
+    announce(`Wonderful! You completed Level ${gameLevel} of 30. Well done!`);
 
-    // Automatically load another image after a short celebration.
+    // Advance to next level after brief celebration
     window.setTimeout(() => {
-      nextImage();
-      startGame(difficulty);
-    }, 3000);
+      const nextLvl = Math.min(TOTAL_GAME_LEVELS, gameLevel + 1);
+      loadPuzzleLevel(nextLvl);
+    }, 2800);
   };
 
   useEffect(() => {
@@ -673,6 +711,13 @@ export default function SimpleJigsawPuzzle() {
             There is no time limit. Enjoy the game!
           </p>
         </header>
+
+        <GameLevelHeader
+          gameId="jigsawPuzzle"
+          currentLevel={gameLevel}
+          onSelectLevel={loadPuzzleLevel}
+          gameTitle="Simple Jigsaw Puzzle"
+        />
 
         <section className="jigsaw-card">
           <div className="jigsaw-toolbar">

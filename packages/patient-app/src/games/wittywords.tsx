@@ -1,35 +1,58 @@
 
 import { useEffect, useState } from "react";
+import { GameLevelManager, TOTAL_GAME_LEVELS } from "../services/GameLevelManager.js";
+import { GameLevelHeader } from "../components/common/GameLevelHeader.js";
 
 type WordQuestion = {
+  level: number;
   word: string;
   hint: string;
   emoji: string;
   category: string;
 };
 
-const WORDS: WordQuestion[] = [
-  { word: "APPLE", hint: "A fruit that can be red or green.", emoji: "🍎", category: "Fruits" },
-  { word: "MANGO", hint: "A sweet tropical fruit.", emoji: "🥭", category: "Fruits" },
-  { word: "GRAPE", hint: "A small fruit that grows in bunches.", emoji: "🍇", category: "Fruits" },
-  { word: "BREAD", hint: "A food often eaten for breakfast.", emoji: "🍞", category: "Food" },
-  { word: "WATER", hint: "Something we drink every day.", emoji: "💧", category: "Daily life" },
-  { word: "HOUSE", hint: "A place where people live.", emoji: "🏠", category: "Daily life" },
-  { word: "CHAIR", hint: "Something you sit on.", emoji: "🪑", category: "Objects" },
-  { word: "TABLE", hint: "Furniture used for meals or work.", emoji: "🪵", category: "Objects" },
-  { word: "CLOCK", hint: "An object that tells us the time.", emoji: "🕒", category: "Objects" },
-  { word: "FLOWER", hint: "A colourful part of a plant.", emoji: "🌸", category: "Nature" },
-  { word: "GARDEN", hint: "A place where flowers and plants grow.", emoji: "🌷", category: "Nature" },
-  { word: "FAMILY", hint: "People who are close to us.", emoji: "👨‍👩‍👧", category: "People" },
-  { word: "FRIEND", hint: "Someone we enjoy spending time with.", emoji: "🤝", category: "People" },
-  { word: "BANANA", hint: "A long, yellow fruit.", emoji: "🍌", category: "Fruits" },
-  { word: "ORANGE", hint: "A round citrus fruit.", emoji: "🍊", category: "Fruits" },
-  { word: "COCONUT", hint: "A fruit often found on a palm tree.", emoji: "🥥", category: "Food" },
-  { word: "MORNING", hint: "The early part of the day.", emoji: "🌅", category: "Daily life" },
-  { word: "RAINBOW", hint: "Colourful bands sometimes seen after rain.", emoji: "🌈", category: "Nature" },
-];
+// Exactly 30 Progressive Levels scaling from 3-letter to 8-letter words
+const LEVEL_WORDS: WordQuestion[] = [
+  // Tier 1 (Levels 1-6): 3-Letter Words
+  { level: 1, word: "CAT", hint: "A friendly pet that purrs gently.", emoji: "🐱", category: "Animals" },
+  { level: 2, word: "SUN", hint: "Bright light in the morning sky.", emoji: "☀️", category: "Nature" },
+  { level: 3, word: "TEA", hint: "A warm soothing cup of Assam tea.", emoji: "☕", category: "Daily life" },
+  { level: 4, word: "CUP", hint: "Something you hold to drink from.", emoji: "🥛", category: "Objects" },
+  { level: 5, word: "DOG", hint: "A loyal and faithful companion.", emoji: "🐶", category: "Animals" },
+  { level: 6, word: "COW", hint: "An animal that gives us fresh milk.", emoji: "🐄", category: "Animals" },
 
-type Difficulty = "Easy" | "Medium" | "Advanced";
+  // Tier 2 (Levels 7-12): 4-Letter Words
+  { level: 7, word: "BIRD", hint: "A feathered friend that chirps in trees.", emoji: "🐦", category: "Nature" },
+  { level: 8, word: "FISH", hint: "Swims peacefully in clean rivers.", emoji: "🐟", category: "Animals" },
+  { level: 9, word: "MOON", hint: "Glows gently in the night sky.", emoji: "🌙", category: "Nature" },
+  { level: 10, word: "BOAT", hint: "Floats across rivers and lakes.", emoji: "🛶", category: "Travel" },
+  { level: 11, word: "RICE", hint: "A wholesome staple food in every meal.", emoji: "🍚", category: "Food" },
+  { level: 12, word: "LEAF", hint: "Fresh green part of a plant.", emoji: "🌿", category: "Nature" },
+
+  // Tier 3 (Levels 13-18): 5-Letter Words
+  { level: 13, word: "APPLE", hint: "A crunchy sweet fruit, red or green.", emoji: "🍎", category: "Fruits" },
+  { level: 14, word: "MANGO", hint: "A fragrant, golden tropical fruit.", emoji: "🥭", category: "Fruits" },
+  { level: 15, word: "WATER", hint: "Cool fresh water essential for health.", emoji: "💧", category: "Daily life" },
+  { level: 16, word: "HOUSE", hint: "A peaceful home where family resides.", emoji: "🏠", category: "Daily life" },
+  { level: 17, word: "CLOCK", hint: "An object that shows the time of day.", emoji: "🕒", category: "Objects" },
+  { level: 18, word: "CHAIR", hint: "A comfortable seat to rest on.", emoji: "🪑", category: "Objects" },
+
+  // Tier 4 (Levels 19-24): 6-Letter Words
+  { level: 19, word: "BANANA", hint: "A sweet yellow fruit easy to peel.", emoji: "🍌", category: "Fruits" },
+  { level: 20, word: "ORANGE", hint: "A round citrus fruit bursting with juice.", emoji: "🍊", category: "Fruits" },
+  { level: 21, word: "FLOWER", hint: "A colourful, scented blossom.", emoji: "🌸", category: "Nature" },
+  { level: 22, word: "GARDEN", hint: "A green space where flowers grow.", emoji: "🌷", category: "Nature" },
+  { level: 23, word: "FRIEND", hint: "Someone special we enjoy sharing moments with.", emoji: "🤝", category: "People" },
+  { level: 24, word: "FAMILY", hint: "Loved ones who support and care for each other.", emoji: "👨‍👩‍👧", category: "People" },
+
+  // Tier 5 (Levels 25-30): 7-8 Letter Words
+  { level: 25, word: "COCONUT", hint: "A sturdy palm fruit with sweet cooling water.", emoji: "🥥", category: "Food" },
+  { level: 26, word: "MORNING", hint: "The calm early start of a new day.", emoji: "🌅", category: "Daily life" },
+  { level: 27, word: "RAINBOW", hint: "Beautiful vibrant arch in the sky after rain.", emoji: "🌈", category: "Nature" },
+  { level: 28, word: "ELEPHANT", hint: "A magnificent gentle animal of the forest.", emoji: "🐘", category: "Animals" },
+  { level: 29, word: "HOSPITAL", hint: "A place for healing, doctors, and wellness.", emoji: "🏥", category: "Health" },
+  { level: 30, word: "UMBRELLA", hint: "Keeps you dry and shaded from rain and sun.", emoji: "☂️", category: "Objects" },
+];
 
 type LetterTile = {
   id: number;
@@ -61,14 +84,8 @@ function scrambleWord(word: string): LetterTile[] {
   return scrambled;
 }
 
-function getRoundCount(difficulty: Difficulty) {
-  return difficulty === "Easy" ? 5 : difficulty === "Medium" ? 8 : 10;
-}
-
 export default function WittyWords() {
-  const [difficulty, setDifficulty] = useState<Difficulty>("Easy");
-  const [questions, setQuestions] = useState<WordQuestion[]>([]);
-  const [questionIndex, setQuestionIndex] = useState(0);
+  const [currentLevel, setCurrentLevel] = useState(1);
   const [tiles, setTiles] = useState<LetterTile[]>([]);
   const [answerIds, setAnswerIds] = useState<number[]>([]);
   const [score, setScore] = useState(0);
@@ -81,15 +98,10 @@ export default function WittyWords() {
   const [gamesCompleted, setGamesCompleted] = useState(0);
   const [bestScore, setBestScore] = useState(0);
 
-  const currentQuestion = questions[questionIndex];
+  const currentQuestion = LEVEL_WORDS[(currentLevel - 1) % LEVEL_WORDS.length];
   const usedIds = new Set(answerIds);
   const availableTiles = tiles.filter((tile) => !usedIds.has(tile.id));
-
-  const progress = questions.length
-    ? Math.round(
-        ((questionIndex + (answered ? 1 : 0)) / questions.length) * 100
-      )
-    : 0;
+  const progress = Math.round((currentLevel / TOTAL_GAME_LEVELS) * 100);
 
   useEffect(() => {
     try {
@@ -103,7 +115,8 @@ export default function WittyWords() {
       // Local storage is optional.
     }
 
-    startGame("Easy");
+    const savedLvl = GameLevelManager.getGameLevel('wittyWords');
+    startLevel(savedLvl);
     // Initialise once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -122,30 +135,20 @@ export default function WittyWords() {
     }
   }
 
-  function loadQuestion(
-    question: WordQuestion,
-    index: number
-  ) {
-    setQuestionIndex(index);
-    setTiles(scrambleWord(question.word));
+  function startLevel(lvl = currentLevel) {
+    const safeLvl = Math.max(1, Math.min(TOTAL_GAME_LEVELS, lvl));
+    const targetQ = LEVEL_WORDS[(safeLvl - 1) % LEVEL_WORDS.length];
+
+    setCurrentLevel(safeLvl);
+    GameLevelManager.saveGameLevel('wittyWords', safeLvl);
+    setTiles(scrambleWord(targetQ.word));
     setAnswerIds([]);
     setAnswered(false);
     setShowHint(false);
-    setMessage("Tap the letters in the correct order.");
-  }
-
-  function startGame(nextDifficulty: Difficulty = difficulty) {
-    const count = getRoundCount(nextDifficulty);
-    const selectedQuestions = shuffle(WORDS).slice(0, count);
-
-    setDifficulty(nextDifficulty);
-    setQuestions(selectedQuestions);
-    setScore(0);
-    setHintsUsed(0);
     setFinished(false);
+    setMessage("Tap the letters in the correct order.");
 
-    loadQuestion(selectedQuestions[0], 0);
-    speak("Welcome to Witty Words. Arrange the letters to make a word.");
+    speak(`Level ${safeLvl}. Arrange the letters to spell ${targetQ.word.length} letters.`);
   }
 
   function selectLetter(id: number) {
@@ -162,6 +165,7 @@ export default function WittyWords() {
       if (nextWord === currentQuestion.word) {
         setAnswered(true);
         setScore((previous) => previous + 1);
+        GameLevelManager.completeLevel('wittyWords', currentLevel, 100);
         setMessage("Excellent! You made the correct word. 🌟");
         speak("Excellent! You made the correct word.");
       } else {
@@ -210,9 +214,9 @@ export default function WittyWords() {
     }
   }
 
-  function nextQuestion() {
-    if (questionIndex + 1 < questions.length) {
-      loadQuestion(questions[questionIndex + 1], questionIndex + 1);
+  function advanceNextLevel() {
+    if (currentLevel < TOTAL_GAME_LEVELS) {
+      startLevel(currentLevel + 1);
     } else {
       finishGame();
     }
@@ -220,12 +224,13 @@ export default function WittyWords() {
 
   function finishGame() {
     setFinished(true);
+    GameLevelManager.completeLevel('wittyWords', currentLevel, 100);
 
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       const data = saved ? JSON.parse(saved) : {};
       const total = (data.gamesCompleted ?? 0) + 1;
-      const best = Math.max(data.bestScore ?? 0, score);
+      const best = Math.max(data.bestScore ?? 0, score + 1);
 
       localStorage.setItem(
         STORAGE_KEY,
@@ -241,7 +246,7 @@ export default function WittyWords() {
       // Game remains playable if saving fails.
     }
 
-    speak(`Well done! You completed the game with ${score} correct answers.`);
+    speak(`Well done! You completed level ${currentLevel}. Magnificent work!`);
   }
 
   function revealAnswer() {
@@ -626,31 +631,25 @@ export default function WittyWords() {
           </p>
         </header>
 
+        <div style={{ marginBottom: 16 }}>
+          <GameLevelHeader
+            gameId="wittyWords"
+            currentLevel={currentLevel}
+            onSelectLevel={(lvl) => startLevel(lvl)}
+            gameTitle="Witty Words"
+          />
+        </div>
+
         {!finished && currentQuestion && (
           <section className="ww-card">
             <div className="ww-topbar">
               <span>
-                Question: {questionIndex + 1} / {questions.length}
+                Target Word: <strong>{currentQuestion.word.length} Letters</strong>
               </span>
-              <span>Score: {score}</span>
+              <span>Category: <strong>{currentQuestion.category}</strong></span>
             </div>
 
-            <div className="ww-controls">
-              <label>
-                <span className="ww-label">Difficulty</span>
-                <select
-                  className="ww-select"
-                  value={difficulty}
-                  onChange={(event) =>
-                    startGame(event.target.value as Difficulty)
-                  }
-                >
-                  <option value="Easy">Easy · 5 words</option>
-                  <option value="Medium">Medium · 8 words</option>
-                  <option value="Advanced">Advanced · 10 words</option>
-                </select>
-              </label>
-
+            <div className="ww-controls" style={{ justifyContent: "flex-end", marginBottom: 12 }}>
               <button
                 onClick={() => {
                   const next = !voiceEnabled;
@@ -759,15 +758,15 @@ export default function WittyWords() {
               )}
 
               {answered && (
-                <button className="ww-primary" onClick={nextQuestion}>
-                  {questionIndex + 1 === questions.length
-                    ? "Finish Game"
-                    : "Next Word →"}
+                <button className="ww-primary" onClick={advanceNextLevel}>
+                  {currentLevel < TOTAL_GAME_LEVELS
+                    ? `Next Level (Level ${currentLevel + 1}) →`
+                    : "Finish All Levels 🏆"}
                 </button>
               )}
 
-              <button onClick={() => startGame(difficulty)}>
-                ↻ Restart
+              <button onClick={() => startLevel(currentLevel)}>
+                ↻ Restart Level
               </button>
             </div>
 
@@ -781,28 +780,36 @@ export default function WittyWords() {
         {finished && (
           <section className="ww-card ww-results">
             <div className="ww-emoji">🎉</div>
-            <h2>Well Done!</h2>
-            <p>You have finished your word arrangement game.</p>
+            <h2>Level {currentLevel} Mastered!</h2>
+            <p>You have successfully arranged the letters to spell the word.</p>
 
             <div className="ww-stat">
-              <strong>{score} / {questions.length}</strong>
-              <span>Correct words</span>
+              <strong>Level {currentLevel}</strong>
+              <span>Tier Completed</span>
             </div>
 
             <p>
-              Every attempt is a chance to learn. You can play again whenever
-              you feel ready.
+              Every level strengthens language recall and motor coordination.
             </p>
 
             <div className="ww-actions">
-              <button
-                className="ww-primary"
-                onClick={() => startGame(difficulty)}
-              >
-                Play Again
-              </button>
-              <button onClick={() => startGame("Easy")}>
-                Start Easy Level
+              {currentLevel < TOTAL_GAME_LEVELS ? (
+                <button
+                  className="ww-primary"
+                  onClick={() => startLevel(currentLevel + 1)}
+                >
+                  Next Level (Level {currentLevel + 1}) →
+                </button>
+              ) : (
+                <button
+                  className="ww-primary"
+                  onClick={() => startLevel(1)}
+                >
+                  Restart From Level 1 🏆
+                </button>
+              )}
+              <button onClick={() => startLevel(currentLevel)}>
+                Replay Level {currentLevel}
               </button>
             </div>
           </section>

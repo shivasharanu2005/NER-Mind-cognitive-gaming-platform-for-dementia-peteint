@@ -13,9 +13,13 @@ import { SupportedLanguage } from '@ner-mind/core';
 
 interface DashboardHeaderProps {
   patientName: string;
+  patientId?: string;
   onToggleSidebarMobile: () => void;
   onOpenCaregiver: () => void;
   onLogout: () => void;
+  onOpenCreateProfile?: () => void;
+  onTestAlarm?: () => void;
+  onPatientSwitched?: (newPatientId: string) => void;
   isOnline: boolean;
   pendingSyncCount?: number;
   onManualSync?: () => void;
@@ -24,9 +28,13 @@ interface DashboardHeaderProps {
 
 export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   patientName,
+  patientId: _patientId,
   onToggleSidebarMobile,
   onOpenCaregiver,
   onLogout,
+  onOpenCreateProfile,
+  onTestAlarm,
+  onPatientSwitched: _onPatientSwitched,
   isOnline,
   pendingSyncCount = 0,
   onManualSync,
@@ -36,6 +44,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   const [isVoiceActive, setIsVoiceActive] = useState<boolean>(() => SpeechService.isEnabled);
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const [showLanguageDropdown, setShowLanguageDropdown] = useState<boolean>(false);
+  const [showPatientDropdown, setShowPatientDropdown] = useState<boolean>(false);
 
   // Update clock every minute
   useEffect(() => {
@@ -244,6 +253,171 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
           flexWrap: 'wrap',
         }}
       >
+        {/* Single Device Profile Pill */}
+        <div style={{ position: 'relative' }}>
+          <button
+            type="button"
+            onClick={() => setShowPatientDropdown(!showPatientDropdown)}
+            style={{
+              backgroundColor: '#F8FAFC',
+              color: '#1E293B',
+              border: '1.5px solid #CBD5E1',
+              borderRadius: 20,
+              padding: '6px 14px',
+              fontSize: 12,
+              fontWeight: 800,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              cursor: 'pointer',
+            }}
+            title="View single device profile details or sign out"
+          >
+            <span>👤 {patientName}</span>
+            <span style={{ color: '#64748B', fontSize: 10 }}>▼</span>
+          </button>
+
+          {showPatientDropdown && (
+            <div
+              style={{
+                position: 'absolute',
+                right: 0,
+                top: 'calc(100% + 6px)',
+                backgroundColor: '#FFFFFF',
+                borderRadius: 18,
+                border: '1.5px solid #E2E8F0',
+                boxShadow: '0 12px 32px rgba(15, 23, 42, 0.15)',
+                minWidth: 260,
+                padding: '14px',
+                zIndex: 1000,
+              }}
+            >
+              <div style={{ fontSize: 11, color: '#64748B', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Single Device Profile
+              </div>
+              <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: '50%',
+                    backgroundColor: '#EFF6FF',
+                    color: '#2563EB',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 18,
+                    fontWeight: 900,
+                    border: '1.5px solid #BFDBFE',
+                  }}
+                >
+                  {patientName.charAt(0)}
+                </div>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 900, color: '#0F172A' }}>{patientName}</div>
+                  <div style={{ fontSize: 12, color: '#16A34A', fontWeight: 700 }}>● Active Profile on Device</div>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: '8px 10px',
+                  backgroundColor: '#F8FAFC',
+                  borderRadius: 10,
+                  fontSize: 11,
+                  color: '#64748B',
+                  lineHeight: 1.4,
+                }}
+              >
+                🔒 Single profile device: Only 1 patient profile is active on this device at a time.
+              </div>
+
+              <div style={{ height: 1, backgroundColor: '#E2E8F0', margin: '12px 0' }} />
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPatientDropdown(false);
+                    onLogout();
+                  }}
+                  style={{
+                    width: '100%',
+                    backgroundColor: '#FEF2F2',
+                    color: '#DC2626',
+                    border: '1px solid #FECACA',
+                    borderRadius: 12,
+                    padding: '9px 12px',
+                    fontSize: 13,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <span>🚪 Sign Out Profile</span>
+                </button>
+
+                {onOpenCreateProfile && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPatientDropdown(false);
+                      onOpenCreateProfile();
+                    }}
+                    style={{
+                      width: '100%',
+                      backgroundColor: '#2563EB',
+                      color: '#FFFFFF',
+                      border: 'none',
+                      borderRadius: 12,
+                      padding: '9px 12px',
+                      fontSize: 13,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                    }}
+                    title="Sign out and replace current profile with a new one"
+                  >
+                    <span>➕ Register New Profile</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Test Activity Alarm Button */}
+        {onTestAlarm && (
+          <button
+            type="button"
+            onClick={onTestAlarm}
+            title="Preview real-time activity reminder chime & voice notice"
+            style={{
+              backgroundColor: '#FEF3C7',
+              color: '#B45309',
+              border: '1.5px solid #FCD34D',
+              borderRadius: 20,
+              padding: '6px 12px',
+              fontSize: 12,
+              fontWeight: 800,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              cursor: 'pointer',
+            }}
+          >
+            <span>🔔</span>
+            <span>Test Notice</span>
+          </button>
+        )}
+
         {/* Offline / Outbox Status Pill */}
         <div
           style={{

@@ -208,16 +208,10 @@ const isReminderMissed = (r: ReminderItem): boolean => {
 
 export const RemindersView: React.FC<Props> = ({ onBack }) => {
   const { language, t, formatBilingual } = useLocalization();
+  const activePatientId = OfflineStorageService.getActivePatientId();
 
   const [reminders, setReminders] = useState<ReminderItem[]>(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY_REMINDERS);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {}
-    return DEFAULT_REMINDERS;
+    return OfflineStorageService.getUserScopedData(STORAGE_KEY_REMINDERS, DEFAULT_REMINDERS, activePatientId);
   });
 
   // Filters
@@ -239,24 +233,24 @@ export const RemindersView: React.FC<Props> = ({ onBack }) => {
   const [formPrescribedBy, setFormPrescribedBy] = useState('');
   const [formIcon, setFormIcon] = useState('💊');
 
-  // Save to localStorage & trigger storage update
+  // Save to user-scoped permanent storage & trigger storage update
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY_REMINDERS, JSON.stringify(reminders));
+      OfflineStorageService.setUserScopedData(STORAGE_KEY_REMINDERS, reminders, activePatientId);
     } catch {}
-  }, [reminders]);
+  }, [reminders, activePatientId]);
 
-  // Sync across tabs
+  // Sync across tabs & reload when active user changes
   useEffect(() => {
     const handleStorage = () => {
       try {
-        const stored = localStorage.getItem(STORAGE_KEY_REMINDERS);
-        if (stored) setReminders(JSON.parse(stored));
+        const updated = OfflineStorageService.getUserScopedData(STORAGE_KEY_REMINDERS, DEFAULT_REMINDERS, activePatientId);
+        setReminders(updated);
       } catch {}
     };
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
-  }, []);
+  }, [activePatientId]);
 
   // Sorted chronologically
   const sortedReminders = useMemo(() => {

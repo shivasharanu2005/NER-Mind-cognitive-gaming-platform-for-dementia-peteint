@@ -1,5 +1,7 @@
 
 import { useEffect, useState } from "react";
+import { GameLevelManager, TOTAL_GAME_LEVELS } from "../services/GameLevelManager.js";
+import { GameLevelHeader } from "../components/common/GameLevelHeader.js";
 
 type Position = { row: number; col: number };
 type Level = {
@@ -9,49 +11,47 @@ type Level = {
   category: string;
 };
 
+// 30 Progressive Levels scaling across 5 Tiers
 const LEVELS: Level[] = [
-  {
-    title: "Easy",
-    size: 5,
-    words: ["WORD"],
-    category: "Simple words",
-  },
-  {
-    title: "Easy Plus",
-    size: 5,
-    words: ["APPLE", "CAT"],
-    category: "Familiar things",
-  },
-  {
-    title: "Fruits",
-    size: 6,
-    words: ["MANGO", "GRAPE", "PEAR"],
-    category: "Fruits",
-  },
-  {
-    title: "Animals",
-    size: 7,
-    words: ["TIGER", "HORSE", "COW", "BIRD"],
-    category: "Animals",
-  },
-  {
-    title: "Daily Life",
-    size: 8,
-    words: ["HOUSE", "CHAIR", "TABLE", "BREAD"],
-    category: "Everyday objects",
-  },
-  {
-    title: "Nature",
-    size: 8,
-    words: ["FLOWER", "GARDEN", "RIVER", "CLOUD", "SUN"],
-    category: "Nature",
-  },
-  {
-    title: "Challenge",
-    size: 9,
-    words: ["FAMILY", "FRIEND", "ORANGE", "BANANA", "WATER"],
-    category: "Familiar words",
-  },
+  // Tier 1: Foundations (Levels 1-6) - 1 word, 4x4 grid
+  { title: "Level 1 • Cat", size: 4, words: ["CAT"], category: "Gentle Start" },
+  { title: "Level 2 • Sun", size: 4, words: ["SUN"], category: "Gentle Start" },
+  { title: "Level 3 • Tea", size: 4, words: ["TEA"], category: "Gentle Start" },
+  { title: "Level 4 • Cup", size: 4, words: ["CUP"], category: "Gentle Start" },
+  { title: "Level 5 • Dog", size: 4, words: ["DOG"], category: "Gentle Start" },
+  { title: "Level 6 • Cow", size: 4, words: ["COW"], category: "Gentle Start" },
+
+  // Tier 2: Developing (Levels 7-12) - 2 words, 5x5 grid
+  { title: "Level 7 • Sky & Sea", size: 5, words: ["BIRD", "FISH"], category: "Nature" },
+  { title: "Level 8 • Morning Meal", size: 5, words: ["RICE", "TEA"], category: "Daily Food" },
+  { title: "Level 9 • Night Glow", size: 5, words: ["MOON", "STAR"], category: "Evening Sky" },
+  { title: "Level 10 • Water Journey", size: 5, words: ["BOAT", "LAKE"], category: "Travel" },
+  { title: "Level 11 • Green Nature", size: 5, words: ["TREE", "LEAF"], category: "Nature" },
+  { title: "Level 12 • Comfort", size: 5, words: ["HOME", "WARM"], category: "Daily Life" },
+
+  // Tier 3: Skill Builder (Levels 13-18) - 3 words, 6x6 grid
+  { title: "Level 13 • Sweet Orchard", size: 6, words: ["APPLE", "MANGO", "PEAR"], category: "Fruits" },
+  { title: "Level 14 • Morning Routine", size: 6, words: ["WATER", "CLEAN", "SMILE"], category: "Wellness" },
+  { title: "Level 15 • Living Room", size: 6, words: ["CHAIR", "TABLE", "CLOCK"], category: "Household" },
+  { title: "Level 16 • Brahmaputra", size: 6, words: ["RIVER", "LOTUS", "BOAT"], category: "Regional" },
+  { title: "Level 17 • Blooming Garden", size: 6, words: ["FLOWER", "PLANT", "SUNNY"], category: "Garden" },
+  { title: "Level 18 • Caring Heart", size: 6, words: ["FAMILY", "PEACE", "HAPPY"], category: "Emotional" },
+
+  // Tier 4: Advanced Challenge (Levels 19-24) - 4 words, 7x7 grid
+  { title: "Level 19 • Fruit Basket", size: 7, words: ["BANANA", "ORANGE", "PAPAYA", "GRAPES"], category: "Nutrition" },
+  { title: "Level 20 • Healthy Day", size: 7, words: ["WALKING", "WATER", "REST", "HEALTH"], category: "Health" },
+  { title: "Level 21 • Northeast Crafts", size: 7, words: ["BAMBOO", "WEAVING", "POTTERY", "CRAFT"], category: "Tradition" },
+  { title: "Level 22 • Nature Symphony", size: 7, words: ["RAINBOW", "BREEZE", "FOREST", "MEADOW"], category: "Environment" },
+  { title: "Level 23 • Kindred Souls", size: 7, words: ["FRIEND", "DOCTOR", "NURSE", "HELPER"], category: "Support Team" },
+  { title: "Level 24 • Peaceful Home", size: 7, words: ["GARDEN", "KITCHEN", "BLANKET", "PILLOW"], category: "Comfort" },
+
+  // Tier 5: Grand Master (Levels 25-30) - 5 words, 8x8 grid
+  { title: "Level 25 • Assam Tea Estate", size: 8, words: ["SUNSHINE", "MORNING", "TEALEAF", "HARVEST", "BASKET"], category: "Heritage" },
+  { title: "Level 26 • Wildlife Sanctuary", size: 8, words: ["ELEPHANT", "RHINO", "HORNBILL", "DEER", "TIGER"], category: "Fauna" },
+  { title: "Level 27 • Daily Serenity", size: 8, words: ["MEDITATE", "BREATHE", "WALKING", "JOURNAL", "HYDRATE"], category: "Mindfulness" },
+  { title: "Level 28 • Festive Joy", size: 8, words: ["FESTIVAL", "LANTERN", "SWEETS", "PRAYER", "MELODY"], category: "Celebration" },
+  { title: "Level 29 • Memory Palace", size: 8, words: ["REMEMBER", "STORY", "PICTURE", "ALBUM", "LAUGHTER"], category: "Cognitive" },
+  { title: "Level 30 • Grand Cognition", size: 8, words: ["CHAMPION", "TRIUMPH", "STRENGTH", "WISDOM", "HARMONY"], category: "Mastery" },
 ];
 
 const STORAGE_KEY = "dementia-word-search-progress";
@@ -256,16 +256,20 @@ export default function WordSearchGame() {
       // The game works even when storage is unavailable.
     }
 
-    resetLevel(0);
+    const savedLvl = GameLevelManager.getGameLevel('wordSearch');
+    const idx = Math.max(0, Math.min(LEVELS.length - 1, savedLvl - 1));
+    resetLevel(idx);
     // Initialise the first level once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function resetLevel(index = levelIndex) {
-    const nextLevel = LEVELS[index];
+    const safeIdx = Math.max(0, Math.min(LEVELS.length - 1, index));
+    const nextLevel = LEVELS[safeIdx];
     const puzzle = makePuzzle(nextLevel);
 
-    setLevelIndex(index);
+    setLevelIndex(safeIdx);
+    GameLevelManager.saveGameLevel('wordSearch', safeIdx + 1);
     setGrid(puzzle.grid);
     setPlacements(puzzle.placements);
     setFoundWords([]);
@@ -322,6 +326,7 @@ export default function WordSearchGame() {
 
       if (nextFound.length === level.words.length) {
         setLevelComplete(true);
+        GameLevelManager.completeLevel('wordSearch', levelIndex + 1, 100);
         setMessage("Excellent! You found every word in this level!");
 
         const newHighest = Math.max(highestLevel, levelIndex + 1);
@@ -387,12 +392,10 @@ export default function WordSearchGame() {
   }
 
   function goToNextLevel() {
-    const nextIndex = Math.min(levelIndex + 1, LEVELS.length - 1);
-
-    if (nextIndex === levelIndex) {
-      resetLevel(levelIndex);
+    if (levelIndex + 1 < TOTAL_GAME_LEVELS) {
+      resetLevel(levelIndex + 1);
     } else {
-      resetLevel(nextIndex);
+      resetLevel(0);
     }
   }
 
@@ -690,6 +693,15 @@ export default function WordSearchGame() {
           <h1>🔎 Word Search</h1>
           <p>Find the hidden words, one level at a time.</p>
         </header>
+
+        <div style={{ marginBottom: 16 }}>
+          <GameLevelHeader
+            gameId="wordSearch"
+            currentLevel={levelIndex + 1}
+            onSelectLevel={(lvl) => resetLevel(lvl - 1)}
+            gameTitle="Word Search"
+          />
+        </div>
 
         <section className="ws-card">
           <div className="ws-top">

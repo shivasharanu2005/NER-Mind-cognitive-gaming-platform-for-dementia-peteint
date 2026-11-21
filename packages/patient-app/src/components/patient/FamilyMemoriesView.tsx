@@ -89,13 +89,10 @@ type ActivityType = 'who_is_this' | 'match_face_name' | 'match_relationship' | '
 
 export const FamilyMemoriesView: React.FC<Props> = ({ onBack, onRefreshParent }) => {
   const { language, t, getRelationshipLabel, getMemberBio, getMemberDisplayName } = useLocalization();
+  const activePatientId = OfflineStorageService.getActivePatientId();
   const [tabMode, setTabMode] = useState<TabMode>('directory');
   const [members, setMembers] = useState<FamilyMemberRecord[]>(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY_FAMILY);
-      if (stored) return JSON.parse(stored);
-    } catch {}
-    return DEFAULT_FAMILY_MEMBERS;
+    return OfflineStorageService.getUserScopedData(STORAGE_KEY_FAMILY, DEFAULT_FAMILY_MEMBERS, activePatientId);
   });
 
   // Activity Session State
@@ -107,17 +104,17 @@ export const FamilyMemoriesView: React.FC<Props> = ({ onBack, onRefreshParent })
   const [showActivitySummary, setShowActivitySummary] = useState(false);
   const [activityStartTime, setActivityStartTime] = useState<number>(0);
 
-  // Sync with localStorage periodically if caregiver updates in another tab
+  // Sync with storage periodically and when active patient changes
   useEffect(() => {
     const handleStorage = () => {
       try {
-        const stored = localStorage.getItem(STORAGE_KEY_FAMILY);
-        if (stored) setMembers(JSON.parse(stored));
+        const updated = OfflineStorageService.getUserScopedData(STORAGE_KEY_FAMILY, DEFAULT_FAMILY_MEMBERS, activePatientId);
+        setMembers(updated);
       } catch {}
     };
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
-  }, []);
+  }, [activePatientId]);
 
   const speakMember = (m: FamilyMemberRecord, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -201,7 +198,7 @@ export const FamilyMemoriesView: React.FC<Props> = ({ onBack, onRefreshParent })
 
     setMembers(updatedMembers);
     try {
-      localStorage.setItem(STORAGE_KEY_FAMILY, JSON.stringify(updatedMembers));
+      OfflineStorageService.setUserScopedData(STORAGE_KEY_FAMILY, updatedMembers, activePatientId);
     } catch {}
 
     // Record Observation in Core Personalization Model (Domain: Recognition)

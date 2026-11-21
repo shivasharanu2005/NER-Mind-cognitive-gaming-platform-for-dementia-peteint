@@ -3,6 +3,8 @@ import { OfflineStorageService } from '../storage/localStorage.js';
 import { RecognitionAttempt, RecognitionCategory, RecognitionImage } from '../storage/indexedDbStorage.js';
 import { SpeechService } from '../audio/speechService.js';
 import { createRecognitionQuestion } from './recognitionQuestion.js';
+import { GameLevelManager, TOTAL_GAME_LEVELS } from '../services/GameLevelManager.js';
+import { GameLevelHeader } from '../components/common/GameLevelHeader.js';
 
 const CATEGORIES: { id: RecognitionCategory; label: string; prompt: string; icon: string }[] = [
   { id: 'family', label: 'Family members', prompt: 'Who is this person?', icon: '👨‍👩‍👧' },
@@ -12,14 +14,13 @@ const CATEGORIES: { id: RecognitionCategory; label: string; prompt: string; icon
   { id: 'objects', label: 'Familiar objects', prompt: 'What is this?', icon: '🧺' },
 ];
 type Difficulty = 'easy' | 'medium' | 'hard';
-const OPTION_COUNT: Record<Difficulty, number> = { easy: 2, medium: 3, hard: 4 };
 
 export const PersonalRecognitionGame: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const patientId = OfflineStorageService.getPatientProfile().patientId;
+  const [currentLevel, setCurrentLevel] = useState(1);
   const [images, setImages] = useState<RecognitionImage[]>([]);
   const [attempts, setAttempts] = useState<RecognitionAttempt[]>([]);
   const [category, setCategory] = useState<RecognitionCategory>('family');
-  const [difficulty, setDifficulty] = useState<Difficulty>('easy');
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [optionIds, setOptionIds] = useState<string[]>([]);
   const [answer, setAnswer] = useState<string | null>(null);
@@ -28,6 +29,21 @@ export const PersonalRecognitionGame: React.FC<{ onExit: () => void }> = ({ onEx
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [srcs, setSrcs] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const savedLvl = GameLevelManager.getGameLevel('personalRecognition');
+    setCurrentLevel(savedLvl);
+  }, []);
+
+  const changeLevel = (lvl: number) => {
+    const bounded = Math.max(1, Math.min(TOTAL_GAME_LEVELS, lvl));
+    setCurrentLevel(bounded);
+    GameLevelManager.saveGameLevel('personalRecognition', bounded);
+    setCurrentId(null);
+  };
+
+  const difficulty: Difficulty = currentLevel <= 6 ? 'easy' : currentLevel <= 18 ? 'medium' : 'hard';
+  const rawCount = currentLevel <= 6 ? 2 : currentLevel <= 18 ? 3 : 4;
 
   const refresh = async () => {
     setLoading(true);
@@ -47,8 +63,8 @@ export const PersonalRecognitionGame: React.FC<{ onExit: () => void }> = ({ onEx
   }, [images]);
 
   const inCategory = useMemo(() => images.filter((item) => item.category === category), [images, category]);
-  const requiredCount = OPTION_COUNT[difficulty];
-  const available = inCategory.length >= requiredCount;
+  const requiredCount = Math.max(2, Math.min(inCategory.length, rawCount));
+  const available = inCategory.length >= 2;
   const current = inCategory.find((item) => item.id === currentId);
   const prompt = CATEGORIES.find((item) => item.id === category)!;
 
@@ -60,7 +76,7 @@ export const PersonalRecognitionGame: React.FC<{ onExit: () => void }> = ({ onEx
     setAnswer(null); setStartedAt(Date.now());
   };
 
-  useEffect(() => { if (!loading && available && !currentId) nextQuestion(category); }, [loading, available, category, currentId, images, difficulty]);
+  useEffect(() => { if (!loading && available && !currentId) nextQuestion(category); }, [loading, available, category, currentId, images, currentLevel]);
 
   const choose = async (selectedId: string) => {
     if (answer || saving || !current) return;
@@ -75,6 +91,9 @@ export const PersonalRecognitionGame: React.FC<{ onExit: () => void }> = ({ onEx
       await OfflineStorageService.recordRecognitionAttempt(attempt);
       setAttempts((old) => [...old, attempt]);
       setAnswer(selectedId);
+      if (correct) {
+        GameLevelManager.completeLevel('personalRecognition', currentLevel, 100);
+      }
       SpeechService.speak(correct ? `That's right. This is ${current.name}.` : `Good try. This is ${current.name}.`);
     } catch { setError('Your answer could not be saved. Please choose again.'); }
     finally { setSaving(false); }
@@ -94,13 +113,22 @@ export const PersonalRecognitionGame: React.FC<{ onExit: () => void }> = ({ onEx
       <div><div style={{ fontSize: 14, color: '#64748B', fontWeight: 700 }}>PERSONAL RECOGNITION</div><h2 style={{ margin: '4px 0', fontSize: 28 }}>Familiar photos</h2></div>
       <button type="button" onClick={onExit} style={secondaryButton}>Exit game</button>
     </div>
+
+    <div style={{ marginBottom: 16 }}>
+      <GameLevelHeader
+        gameId="personalRecognition"
+        currentLevel={currentLevel}
+        onSelectLevel={(lvl) => changeLevel(lvl)}
+        gameTitle="Familiar Photos"
+      />
+    </div>
+
     {error && <p role="alert" style={{ color: '#B91C1C', fontWeight: 700 }}>{error}</p>}
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12, marginBottom: 18 }}>
-      <label style={fieldLabel}>Choose a category<select value={category} onChange={(e) => { const next = e.target.value as RecognitionCategory; setCategory(next); setCurrentId(null); }} style={inputStyle}>{CATEGORIES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
-      <label style={fieldLabel}>Choose a level<select value={difficulty} onChange={(e) => { setDifficulty(e.target.value as Difficulty); setCurrentId(null); }} style={inputStyle}><option value="easy">Easy · 2 choices</option><option value="medium">Medium · 3 choices</option><option value="hard">Hard · 4 choices</option></select></label>
+      <label style={fieldLabel}>Choose a photo category<select value={category} onChange={(e) => { const next = e.target.value as RecognitionCategory; setCategory(next); setCurrentId(null); }} style={inputStyle}>{CATEGORIES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
     </div>
     {loading ? <div role="status" style={{ textAlign: 'center', padding: 40, color: '#64748B' }}>Loading your photos…</div> : !available ? <div style={{ textAlign: 'center', padding: 28, background: '#F8FAFC', borderRadius: 18, border: '1px solid #CBD5E1' }}>
-      <div style={{ fontSize: 44 }}>{prompt.icon}</div><h3 style={{ fontSize: 22 }}>Add more {prompt.label.toLowerCase()}</h3><p style={{ fontSize: 16, color: '#475569' }}>This level needs {requiredCount} different photos in this category. Ask your caregiver to add them.</p><button type="button" onClick={onExit} style={secondaryButton}>Back</button>
+      <div style={{ fontSize: 44 }}>{prompt.icon}</div><h3 style={{ fontSize: 22 }}>Add more {prompt.label.toLowerCase()}</h3><p style={{ fontSize: 16, color: '#475569' }}>This category needs at least 2 different photos. Ask your caregiver to add them.</p><button type="button" onClick={onExit} style={secondaryButton}>Back</button>
     </div> : current ? <section aria-label="Recognition question" style={{ borderRadius: 22, border: '2px solid #DDE5ED', background: 'white', padding: 20, boxShadow: '0 4px 16px rgba(18,59,99,.05)' }}>
       <h3 style={{ textAlign: 'center', fontSize: 25, margin: '0 0 16px' }}>{prompt.prompt}</h3>
       {srcs[current.id] && <img src={srcs[current.id]} alt="Photo to recognize" style={{ display: 'block', width: '100%', maxWidth: 540, height: 'min(46vh, 380px)', minHeight: 230, margin: '0 auto 18px', objectFit: 'contain', background: '#F1F5F9', borderRadius: 16 }} />}
@@ -113,7 +141,7 @@ export const PersonalRecognitionGame: React.FC<{ onExit: () => void }> = ({ onEx
         })}
       </div>
       {answer && <div role="status" aria-live="polite" style={{ textAlign: 'center', marginTop: 18, fontSize: 22, fontWeight: 800, color: answer === current.id ? '#166534' : '#9A3412' }}>{answer === current.id ? 'Wonderful! That is right. 🌟' : `Good try. This is ${current.name}.`}</div>}
-      <button type="button" disabled={!answer || saving} onClick={() => nextQuestion()} style={{ ...primaryButton, display: 'block', width: '100%', marginTop: 18, opacity: answer ? 1 : .55 }}>{saving ? 'Saving answer…' : 'Next question →'}</button>
+      <button type="button" disabled={!answer || saving} onClick={() => { if (currentLevel < TOTAL_GAME_LEVELS) changeLevel(currentLevel + 1); else nextQuestion(); }} style={{ ...primaryButton, display: 'block', width: '100%', marginTop: 18, opacity: answer ? 1 : .55 }}>{saving ? 'Saving answer…' : currentLevel < TOTAL_GAME_LEVELS ? `Next Level (Level ${currentLevel + 1}) →` : 'Next question →'}</button>
     </section> : null}
     <section aria-label="Your practice progress" style={{ marginTop: 18 }}>
       <h3 style={{ fontSize: 20, margin: '0 0 10px' }}>Practice progress</h3>

@@ -18,4 +18,5 @@ export * from './cognitive/templates/calculationScenarios.js';
 export * from './cognitive/templates/planningSchedules.js';
 export * from './types/language.js';
 export * from './cognitive/templates/localizedGameContent.js';
+export * from './calling/index.js';
 

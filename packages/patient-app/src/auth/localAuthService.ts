@@ -14,6 +14,7 @@ export interface LocalUser {
   role: UserRole;
   patientId?: string; // For patient or assigned caregiver
   displayName: string;
+  emailOrMobile?: string;
 }
 
 export interface LocalSession {
@@ -80,6 +81,61 @@ const SESSION_TTL_MS = 14400000; // 4 hours
 
 export class LocalAuthService {
   private static activeSession: LocalSession | null = null;
+  private static readonly CUSTOM_ACCOUNTS_KEY = 'ner_mind_custom_auth_accounts';
+
+  /**
+   * Retrieves all local accounts (standard seeds + custom registered caretakers)
+   */
+  public static getAccounts(): LocalUser[] {
+    let custom: LocalUser[] = [];
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(this.CUSTOM_ACCOUNTS_KEY);
+        if (stored) custom = JSON.parse(stored);
+      } catch {}
+    }
+    return [...LOCAL_ACCOUNTS, ...custom];
+  }
+
+  /**
+   * Registers a new caretaker account offline with SHA-256 password hash.
+   */
+  public static async registerCaretakerAccount(
+    caretakerName: string,
+    passwordPlain: string,
+    patientId: string,
+    emailOrMobile?: string
+  ): Promise<LocalUser> {
+    const rawUsername = (emailOrMobile && emailOrMobile.includes('@')
+      ? emailOrMobile.split('@')[0]
+      : (emailOrMobile || caretakerName)).toLowerCase().replace(/[^a-z0-9_]/g, '_');
+    const username = rawUsername || `caregiver_${Date.now()}`;
+    const passwordHash = await this.computeSha256(passwordPlain);
+
+    const newUser: LocalUser = {
+      id: `caregiver_${Date.now()}`,
+      username,
+      passwordHashSha256: passwordHash,
+      role: 'CAREGIVER',
+      patientId,
+      displayName: `${caretakerName.trim()} (Caregiver)`,
+      emailOrMobile: emailOrMobile?.trim(),
+    };
+
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(this.CUSTOM_ACCOUNTS_KEY);
+        const existing: LocalUser[] = stored ? JSON.parse(stored) : [];
+        const filtered = existing.filter((u) => u.username !== username && u.patientId !== patientId);
+        filtered.unshift(newUser);
+        localStorage.setItem(this.CUSTOM_ACCOUNTS_KEY, JSON.stringify(filtered));
+      } catch (err) {
+        console.warn('Failed to store custom auth account:', err);
+      }
+    }
+
+    return newUser;
+  }
 
   /**
    * Computes SHA-256 hex digest using WebCrypto API (available offline in all modern browsers).
@@ -103,8 +159,15 @@ export class LocalAuthService {
   /**
    * Authenticates user entirely offline against local securely hashed credentials.
    */
-  public static async login(username: string, passwordPlain: string): Promise<LocalSession> {
-    const user = LOCAL_ACCOUNTS.find((u) => u.username.toLowerCase() === username.trim().toLowerCase());
+  public static async login(usernameOrEmail: string, passwordPlain: string): Promise<LocalSession> {
+    const cleanId = usernameOrEmail.trim().toLowerCase();
+    const accounts = this.getAccounts();
+    const user = accounts.find((u) => {
+      if (u.username.toLowerCase() === cleanId) return true;
+      if (u.emailOrMobile && u.emailOrMobile.toLowerCase() === cleanId) return true;
+      if (u.displayName.toLowerCase() === cleanId) return true;
+      return false;
+    });
     if (!user) {
       throw new Error('Invalid credentials.');
     }

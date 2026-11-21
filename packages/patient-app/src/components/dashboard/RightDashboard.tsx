@@ -371,6 +371,36 @@ export const RightDashboard: React.FC<RightDashboardProps> = ({
         </button>
       </div>
 
+      {/* 1.5 FAMILY & CARE VIDEO CALLS */}
+      <div
+        onClick={() => onNavigateTab('call')}
+        role="button"
+        tabIndex={0}
+        style={{
+          backgroundColor: '#10B981',
+          color: '#FFFFFF',
+          borderRadius: 20,
+          padding: '16px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          cursor: 'pointer',
+          boxShadow: '0 4px 14px rgba(16, 185, 129, 0.25)',
+          transition: 'transform 0.15s ease',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 28 }}>📞</span>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 900 }}>Family & Care Calls</div>
+            <div style={{ fontSize: 13, color: '#D1FAE5' }}>1-tap instant face-to-face video</div>
+          </div>
+        </div>
+        <span style={{ backgroundColor: 'rgba(255,255,255,0.2)', padding: '6px 12px', borderRadius: 12, fontSize: 13, fontWeight: 800 }}>
+          Open →
+        </span>
+      </div>
+
       {/* 2. TODAY'S PLAN CARD */}
       <div
         style={{

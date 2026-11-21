@@ -3,9 +3,10 @@ import { OfflineStorageService } from '../storage/localStorage.js';
 import { RecognitionAttempt, RecognitionImage } from '../storage/indexedDbStorage.js';
 import { SpeechService } from '../audio/speechService.js';
 import { createRecognitionQuestion } from './recognitionQuestion.js';
+import { GameLevelManager, TOTAL_GAME_LEVELS } from '../services/GameLevelManager.js';
+import { GameLevelHeader } from '../components/common/GameLevelHeader.js';
 
 type Difficulty = 'easy' | 'medium' | 'hard';
-const OPTION_COUNT: Record<Difficulty, number> = { easy: 2, medium: 3, hard: 4 };
 
 export function createPersonVoiceQuestion(
   profiles: RecognitionImage[], optionCount: number, previousId?: string, random: () => number = Math.random,
@@ -16,9 +17,9 @@ export function createPersonVoiceQuestion(
 
 export const IdentifyPersonGame: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const patientId = OfflineStorageService.getPatientProfile().patientId;
+  const [currentLevel, setCurrentLevel] = useState(1);
   const [profiles, setProfiles] = useState<RecognitionImage[]>([]);
   const [progress, setProgress] = useState<RecognitionAttempt[]>([]);
-  const [difficulty, setDifficulty] = useState<Difficulty>('easy');
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [optionIds, setOptionIds] = useState<string[]>([]);
   const [wrongChoiceId, setWrongChoiceId] = useState<string | null>(null);
@@ -32,6 +33,18 @@ export const IdentifyPersonGame: React.FC<{ onExit: () => void }> = ({ onExit })
   const [audioError, setAudioError] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   const audioUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const savedLvl = GameLevelManager.getGameLevel('identifyPerson');
+    setCurrentLevel(savedLvl);
+  }, []);
+
+  const changeLevel = (lvl: number) => {
+    const bounded = Math.max(1, Math.min(TOTAL_GAME_LEVELS, lvl));
+    setCurrentLevel(bounded);
+    GameLevelManager.saveGameLevel('identifyPerson', bounded);
+    setCurrentId(null);
+  };
 
   const refresh = async () => {
     setLoading(true);
@@ -52,7 +65,9 @@ export const IdentifyPersonGame: React.FC<{ onExit: () => void }> = ({ onExit })
   }, []);
 
   const current = profiles.find((item) => item.id === currentId);
-  const optionCount = OPTION_COUNT[difficulty];
+  const difficulty: Difficulty = currentLevel <= 6 ? 'easy' : currentLevel <= 18 ? 'medium' : 'hard';
+  const rawOptionCount = currentLevel <= 6 ? 2 : currentLevel <= 18 ? 3 : 4;
+  const optionCount = Math.max(2, Math.min(profiles.length, rawOptionCount));
 
   const replayVoice = async (person = current) => {
     if (!person?.voice || !audioRef.current) return;
@@ -104,6 +119,7 @@ export const IdentifyPersonGame: React.FC<{ onExit: () => void }> = ({ onExit })
     try {
       await saveAnswer(current, wrongTries === 0);
       setSolved(true); setWrongChoiceId(null);
+      GameLevelManager.completeLevel('identifyPerson', currentLevel, wrongTries === 0 ? 100 : 70);
       SpeechService.speak(wrongTries === 0 ? 'That is right. Well done!' : 'You found the voice. Well done!');
     } catch { setError('Your answer could not be saved. Please try again.'); }
     finally { setSaving(false); }
@@ -122,32 +138,40 @@ export const IdentifyPersonGame: React.FC<{ onExit: () => void }> = ({ onExit })
       <button type="button" onClick={() => { audioRef.current?.pause(); onExit(); }} style={secondaryButton}>Exit game</button>
     </header>
     <p style={{ fontSize: 17, color: '#475569', lineHeight: 1.5, marginTop: 0 }}>Listen to a familiar family voice, then tap the name you hear.</p>
+    <div style={{ marginBottom: 16 }}>
+      <GameLevelHeader
+        gameId="identifyPerson"
+        currentLevel={currentLevel}
+        onSelectLevel={(lvl) => changeLevel(lvl)}
+        gameTitle="Identify the Person"
+      />
+    </div>
+
     {error && <p role="alert" style={{ color: '#B91C1C', fontWeight: 700 }}>{error}</p>}
 
-    {loading ? <div role="status" style={{ textAlign: 'center', padding: 36 }}>Loading family voices…</div> : usableProfiles.length < optionCount ? <section style={panelStyle}>
+    {loading ? <div role="status" style={{ textAlign: 'center', padding: 36 }}>Loading family voices…</div> : usableProfiles.length < 2 ? <section style={panelStyle}>
       <div style={{ fontSize: 48, textAlign: 'center' }}>🎙️</div><h3 style={{ textAlign: 'center', fontSize: 23 }}>More family voices needed</h3>
-      <p style={{ textAlign: 'center', color: '#475569', fontSize: 16, lineHeight: 1.5 }}>Ask your caregiver to add and select at least {optionCount} family members with voice recordings for this level.</p>
-      <DifficultyControl difficulty={difficulty} onChange={setDifficulty} />
+      <p style={{ textAlign: 'center', color: '#475569', fontSize: 16, lineHeight: 1.5 }}>Ask your caregiver to add and select at least 2 family members with voice recordings.</p>
       <button type="button" onClick={onExit} style={{ ...secondaryButton, display: 'block', margin: '18px auto 0' }}>Back to games</button>
     </section> : !current ? <section style={panelStyle}>
-      <div style={{ fontSize: 50, textAlign: 'center' }}>👂</div><h3 style={{ fontSize: 24, textAlign: 'center', margin: '8px 0' }}>Ready to listen?</h3>
-      <p style={{ textAlign: 'center', color: '#475569', fontSize: 17 }}>Choose how many names you would like to see.</p>
-      <DifficultyControl difficulty={difficulty} onChange={setDifficulty} />
+      <div style={{ fontSize: 50, textAlign: 'center' }}>👂</div><h3 style={{ fontSize: 24, textAlign: 'center', margin: '8px 0' }}>Level {currentLevel}: Ready to listen?</h3>
+      <p style={{ textAlign: 'center', color: '#475569', fontSize: 17 }}>Listen to the voice and identify which family member is speaking.</p>
       <button type="button" onClick={() => void startQuestion(null)} style={{ ...primaryButton, display: 'block', width: '100%', maxWidth: 400, margin: '20px auto 0' }}>Start listening</button>
     </section> : <section style={panelStyle} aria-label="Identify the speaking family member">
-      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}><span style={{ color: '#9C2754', background: '#FBE8EE', padding: '7px 13px', borderRadius: 99, fontSize: 14, fontWeight: 800 }}>{difficulty[0].toUpperCase() + difficulty.slice(1)} · {optionCount} names</span></div>
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}><span style={{ color: '#9C2754', background: '#FBE8EE', padding: '7px 13px', borderRadius: 99, fontSize: 14, fontWeight: 800 }}>Level {currentLevel} · {optionCount} names</span></div>
       <h3 style={{ textAlign: 'center', fontSize: 30, margin: '4px 0 18px' }}>Who is speaking?</h3>
       <button type="button" onClick={() => void replayVoice()} style={{ ...secondaryButton, display: 'block', minHeight: 58, margin: '0 auto 20px', color: '#9C2754', borderColor: '#F6A6A6', fontSize: 18 }}>🔊 Replay voice</button>
       <button type="button" onClick={() => { audioRef.current?.pause(); SpeechService.speak('Listen to the voice. Who is speaking? Tap the name you hear.', 0.85, undefined, undefined, () => { void replayVoice(); }); }} style={{ ...secondaryButton, display: 'block', minHeight: 48, margin: '0 auto 16px' }}>Hear instructions</button>
       {audioError && <p role="status" style={{ textAlign: 'center', color: '#9A3412', fontWeight: 700 }}>Tap Replay voice to listen again.</p>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-        {optionIds.map((id, index) => { const person = profiles.find((profile) => profile.id === id)!; const isWrongSelection = wrongChoiceId === id;
+        {optionIds.map((id, index) => {
+          const person = profiles.find((profile) => profile.id === id)!; const isWrongSelection = wrongChoiceId === id;
           return <button key={id} type="button" disabled={solved || saving} onClick={() => void chooseAnswer(id)} style={{ border: `2px solid ${isWrongSelection ? '#E11D48' : solved && id === current.id ? '#16A34A' : '#D8A1B4'}`, background: isWrongSelection ? '#FFF1F2' : solved && id === current.id ? '#DCFCE7' : '#FFFFFF', borderRadius: 17, minHeight: 76, padding: '14px 18px', textAlign: 'left', color: '#17324D', fontSize: 22, fontWeight: 800, cursor: solved || saving ? 'default' : 'pointer', boxShadow: '0 3px 10px rgba(18,59,99,.05)' }}><span style={{ color: '#9C2754', marginRight: 12 }}>{String.fromCharCode(65 + index)}.</span>{person.name}</button>;
         })}
       </div>
       {!solved && wrongTries > 0 && <div role="status" aria-live="polite" style={{ textAlign: 'center', background: '#FFF7DC', color: '#755700', padding: 14, borderRadius: 14, marginTop: 16, fontSize: 17, fontWeight: 700 }}>Good try. Take your time. Listen again, then choose the name you hear.</div>}
       {solved && <div role="status" aria-live="polite" style={{ textAlign: 'center', color: wrongTries === 0 ? '#166534' : '#426B45', background: '#E8F7EF', padding: 14, borderRadius: 14, marginTop: 16, fontSize: 21, fontWeight: 800 }}>{wrongTries === 0 ? `That’s right! ${current.name} was speaking. 🌟` : `You found it! ${current.name} was speaking. 🌟`}</div>}
-      <button type="button" disabled={!solved || saving} onClick={() => void startQuestion(currentId)} style={{ ...primaryButton, display: 'block', width: '100%', marginTop: 18, opacity: solved ? 1 : .55 }}>{saving ? 'Saving…' : 'Next question →'}</button>
+      <button type="button" disabled={!solved || saving} onClick={() => { if (currentLevel < TOTAL_GAME_LEVELS) changeLevel(currentLevel + 1); else void startQuestion(currentId); }} style={{ ...primaryButton, display: 'block', width: '100%', marginTop: 18, opacity: solved ? 1 : .55 }}>{saving ? 'Saving…' : currentLevel < TOTAL_GAME_LEVELS ? `Next Level (Level ${currentLevel + 1}) →` : 'Play Again'}</button>
     </section>}
 
     <section aria-label="Identify the Person progress" style={{ marginTop: 18 }}>
@@ -162,7 +186,6 @@ export const IdentifyPersonGame: React.FC<{ onExit: () => void }> = ({ onExit })
   </div>;
 };
 
-const DifficultyControl: React.FC<{ difficulty: Difficulty; onChange: (level: Difficulty) => void }> = ({ difficulty, onChange }) => <label style={{ display: 'flex', flexDirection: 'column', gap: 7, maxWidth: 360, margin: '14px auto', fontWeight: 700, fontSize: 16 }}>Answer choices<select value={difficulty} onChange={(event) => onChange(event.target.value as Difficulty)} style={{ minHeight: 50, border: '1px solid #94A3B8', borderRadius: 12, padding: 10, fontSize: 17, color: '#17324D', background: '#FFFFFF' }}><option value="easy">Easy · 2 names</option><option value="medium">Medium · 3 names</option><option value="hard">Hard · 4 names</option></select></label>;
 const ProgressCard: React.FC<{ label: string; value: string }> = ({ label, value }) => <div style={{ border: '1px solid #DDE5ED', borderRadius: 14, padding: 14, background: '#F8FAFC' }}><div style={{ color: '#64748B', fontSize: 14, fontWeight: 700 }}>{label}</div><div style={{ marginTop: 5, color: '#17324D', fontSize: 18, fontWeight: 800 }}>{value}</div></div>;
 const panelStyle: React.CSSProperties = { borderRadius: 22, border: '2px solid #F6A6A6', background: '#FFFFFF', padding: 22, boxShadow: '0 4px 16px rgba(18,59,99,.05)' };
 const primaryButton: React.CSSProperties = { border: 0, borderRadius: 14, background: '#9C2754', color: 'white', minHeight: 60, padding: 14, fontSize: 19, fontWeight: 800, cursor: 'pointer' };

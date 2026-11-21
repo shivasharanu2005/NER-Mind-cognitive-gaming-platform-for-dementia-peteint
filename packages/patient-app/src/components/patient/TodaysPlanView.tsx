@@ -265,17 +265,11 @@ export const TodaysPlanView: React.FC<Props> = ({
   onStartFamily,
 }) => {
   const { language, t, formatBilingual } = useLocalization();
+  const activePatientId = OfflineStorageService.getActivePatientId();
 
-  // Primary list of activities
+  // Primary list of activities (Permanently saved per particular user)
   const [items, setItems] = useState<PlanItem[]>(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY_DAILY_PLAN);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {}
-    return DEFAULT_PLAN;
+    return OfflineStorageService.getUserScopedData(STORAGE_KEY_DAILY_PLAN, DEFAULT_PLAN, activePatientId);
   });
 
   // Filter states
@@ -297,34 +291,33 @@ export const TodaysPlanView: React.FC<Props> = ({
   const [formIcon, setFormIcon] = useState('📋');
   const [formImageUrl, setFormImageUrl] = useState('');
 
-  // Persist items to localStorage and notify storage listeners
+  // Persist items to user-scoped permanent storage and notify storage listeners
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY_DAILY_PLAN, JSON.stringify(items));
-      // Save daily history record
+      OfflineStorageService.setUserScopedData(STORAGE_KEY_DAILY_PLAN, items, activePatientId);
+      // Save daily history record scoped to this user
       const todayKey = new Date().toISOString().split('T')[0];
-      const historyStr = localStorage.getItem(STORAGE_KEY_PLAN_HISTORY) || '{}';
-      const history = JSON.parse(historyStr);
+      const history = OfflineStorageService.getUserScopedData<Record<string, any>>(STORAGE_KEY_PLAN_HISTORY, {}, activePatientId);
       history[todayKey] = {
         total: items.length,
         completed: items.filter((i) => i.isCompleted).length,
         updatedAt: new Date().toISOString(),
       };
-      localStorage.setItem(STORAGE_KEY_PLAN_HISTORY, JSON.stringify(history));
+      OfflineStorageService.setUserScopedData(STORAGE_KEY_PLAN_HISTORY, history, activePatientId);
     } catch {}
-  }, [items]);
+  }, [items, activePatientId]);
 
-  // Sync if another tab modifies storage
+  // Sync if another tab modifies storage or active user switches
   useEffect(() => {
     const handleStorage = () => {
       try {
-        const stored = localStorage.getItem(STORAGE_KEY_DAILY_PLAN);
-        if (stored) setItems(JSON.parse(stored));
+        const updated = OfflineStorageService.getUserScopedData(STORAGE_KEY_DAILY_PLAN, DEFAULT_PLAN, activePatientId);
+        setItems(updated);
       } catch {}
     };
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
-  }, []);
+  }, [activePatientId]);
 
   // Sorted chronologically morning to night
   const sortedItems = useMemo(() => {

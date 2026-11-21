@@ -7,11 +7,12 @@ import {
 import {
   IndexedDbStorageService,
   DEFAULT_NER_PROFILE,
+  SECONDARY_NER_PROFILE,
   RecognitionImage,
   RecognitionAttempt,
 } from './indexedDbStorage.js';
 
-export { DEFAULT_NER_PROFILE };
+export { DEFAULT_NER_PROFILE, SECONDARY_NER_PROFILE };
 
 /**
  * OfflineStorageService proxy delegating 100% to IndexedDbStorageService.
@@ -30,8 +31,36 @@ export class OfflineStorageService {
     return IndexedDbStorageService.getPatientProfile();
   }
 
+  public static getActivePatientId(): string {
+    return IndexedDbStorageService.getActivePatientId();
+  }
+
+  public static async setActivePatientId(patientId: string): Promise<PersonalMemoryProfile> {
+    return await IndexedDbStorageService.setActivePatientId(patientId);
+  }
+
+  public static async getAllPatientProfiles(): Promise<PersonalMemoryProfile[]> {
+    return await IndexedDbStorageService.getAllPatientProfiles();
+  }
+
+  public static getPatientStorageKey(baseKey: string, patientId?: string): string {
+    return IndexedDbStorageService.getPatientStorageKey(baseKey, patientId);
+  }
+
+  public static getUserScopedData<T>(baseKey: string, defaultFallback: T, patientId?: string): T {
+    return IndexedDbStorageService.getUserScopedData<T>(baseKey, defaultFallback, patientId);
+  }
+
+  public static setUserScopedData<T>(baseKey: string, data: T, patientId?: string): void {
+    IndexedDbStorageService.setUserScopedData<T>(baseKey, data, patientId);
+  }
+
   public static async savePatientProfile(profile: PersonalMemoryProfile): Promise<void> {
     await IndexedDbStorageService.savePatientProfile(profile);
+  }
+
+  public static async createPatientProfile(profile: PersonalMemoryProfile): Promise<PersonalMemoryProfile> {
+    return await IndexedDbStorageService.createPatientProfile(profile);
   }
 
   public static getObservations(): CognitiveObservation[] {

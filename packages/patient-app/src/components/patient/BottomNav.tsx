@@ -1,7 +1,7 @@
 import React from 'react';
 import { useLocalization } from '../../localization';
 
-export type PatientTab = 'home' | 'games' | 'plan' | 'reminders' | 'progress' | 'family' | 'transfer';
+export type PatientTab = 'home' | 'games' | 'plan' | 'reminders' | 'progress' | 'family' | 'transfer' | 'call';
 
 interface Props {
   activeTab: PatientTab;
@@ -13,6 +13,7 @@ export const BottomNav: React.FC<Props> = ({ activeTab, onTabChange }) => {
 
   const navItems: { id: PatientTab; label: string; icon: string }[] = [
     { id: 'home', label: t('nav.home'), icon: '🏠' },
+    { id: 'call', label: 'Call', icon: '📞' },
     { id: 'games', label: t('nav.games'), icon: '🎮' },
     { id: 'plan', label: t('nav.plan'), icon: '📋' },
     { id: 'reminders', label: t('nav.reminders'), icon: '⏰' },
@@ -28,15 +29,15 @@ export const BottomNav: React.FC<Props> = ({ activeTab, onTabChange }) => {
         bottom: 0,
         left: 0,
         right: 0,
-        height: 72,
+        minHeight: 72,
         backgroundColor: '#FFFFFF',
         borderTop: '2px solid #DDE5ED',
         display: 'flex',
         justifyContent: 'space-around',
         alignItems: 'center',
-        padding: '0 12px',
+        padding: '6px 12px max(8px, env(safe-area-inset-bottom)) 12px',
         zIndex: 1000,
-        boxShadow: '0 -4px 16px rgba(18, 59, 99, 0.06)',
+        boxShadow: '0 -4px 16px rgba(18, 59, 99, 0.08)',
       }}
     >
       {navItems.map((item) => {

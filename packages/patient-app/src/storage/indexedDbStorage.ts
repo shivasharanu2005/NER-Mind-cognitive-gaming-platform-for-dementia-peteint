@@ -12,6 +12,7 @@ import {
   createInitialPersonalModel,
   CognitiveDomain,
 } from '@ner-mind/core';
+import { LocalAuthService } from '../auth/localAuthService.js';
 
 export const DEFAULT_NER_PROFILE: PersonalMemoryProfile = {
   patientId: 'patient-ner-001',
@@ -95,8 +96,67 @@ export const DEFAULT_NER_PROFILE: PersonalMemoryProfile = {
   },
 };
 
+export const SECONDARY_NER_PROFILE: PersonalMemoryProfile = {
+  patientId: 'patient-ner-002',
+  displayName: 'Anupama Barua',
+  preferredLanguage: 'as',
+  secondaryLanguage: 'en',
+  accessibility: {
+    highContrast: true,
+    fontSize: 'large',
+    voiceInputEnabled: true,
+    audioPromptsEnabled: true,
+    speechRate: 0.85,
+    minimumTouchTargetPx: 64,
+  },
+  familiarObjects: [
+    {
+      id: 'obj-2-1',
+      name: 'Assam Silk Mekhela',
+      category: 'personal',
+      culturalRegionTag: 'NER',
+      significanceHint: 'Muga silk traditional attire',
+      consentToUseInGames: true,
+    },
+    {
+      id: 'obj-2-2',
+      name: 'Bell Metal Xorai',
+      category: 'craft',
+      culturalRegionTag: 'NER',
+      significanceHint: 'Traditional Sarthebari bell metal offering tray',
+      consentToUseInGames: true,
+    },
+  ],
+  familiarRoutines: [
+    {
+      id: 'routine-2-1',
+      title: 'Morning Prayer & Flowers',
+      steps: ['Wash hands', 'Collect hibiscus flowers', 'Light oil lamp', 'Chant peace prayer'],
+      timeOfDay: 'morning',
+      consentToUseInSequencing: true,
+    },
+  ],
+  familyContacts: [
+    {
+      id: 'cnt-2-1',
+      fullName: 'Anita Barua',
+      relationship: 'Daughter (Caregiver)',
+      phoneNumber: '+91 98640 54321',
+      isEmergencyContact: true,
+      photoConsentGranted: true,
+      voiceConsentGranted: true,
+    },
+  ],
+  consent: {
+    status: 'granted',
+    consentedBy: 'caregiver',
+    grantedAt: '2026-09-01T10:00:00.000Z',
+    dataRetentionDays: 365,
+  },
+};
+
 const DB_NAME = 'ner_mind_db';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 export type RecognitionCategory = 'family' | 'friends' | 'animals' | 'plants' | 'objects';
 export interface RecognitionImage {
@@ -195,6 +255,9 @@ export class IndexedDbStorageService {
           if (!db.objectStoreNames.contains('recognition_crypto_keys')) {
             db.createObjectStore('recognition_crypto_keys');
           }
+          if (!db.objectStoreNames.contains('app_data')) {
+            db.createObjectStore('app_data');
+          }
         },
       });
     }
@@ -210,15 +273,46 @@ export class IndexedDbStorageService {
   public static async init(): Promise<void> {
     await this.migrateFromLocalStorageIfNeeded();
     const db = await this.getDB();
+    const activePid = this.getActivePatientId();
 
     if (db) {
-      // 1. Profile
-      const p = await db.get('patient_profile', DEFAULT_NER_PROFILE.patientId);
+      // 0. Hydrate app_data from IndexedDB to localStorage if needed
+      if (db.objectStoreNames.contains('app_data')) {
+        try {
+          const keys = await db.getAllKeys('app_data');
+          for (const k of keys) {
+            const keyStr = String(k);
+            if (typeof localStorage !== 'undefined' && !localStorage.getItem(keyStr)) {
+              const val = await db.get('app_data', k);
+              if (val !== undefined && val !== null) {
+                localStorage.setItem(keyStr, JSON.stringify(val));
+              }
+            }
+          }
+        } catch { }
+      }
+
+      // 1. Profile: Load active profile for activePid
+      let p = await db.get('patient_profile', activePid);
+      if (!p && typeof localStorage !== 'undefined') {
+        const raw = localStorage.getItem(`ner_mind_patient_profile_${activePid}`);
+        if (raw) {
+          try {
+            p = JSON.parse(raw);
+            await db.put('patient_profile', p);
+          } catch { }
+        }
+      }
+      if (!p) {
+        p = await db.get('patient_profile', DEFAULT_NER_PROFILE.patientId);
+      }
       if (p) {
         this.cachedProfile = p;
+        this.activePatientId = p.patientId;
       } else {
         await db.put('patient_profile', DEFAULT_NER_PROFILE);
         this.cachedProfile = DEFAULT_NER_PROFILE;
+        this.activePatientId = DEFAULT_NER_PROFILE.patientId;
       }
 
       // 2. Observations
@@ -236,18 +330,18 @@ export class IndexedDbStorageService {
       this.cachedTransfers = (await db.getAll('transfer_history')) || [];
 
       // 5. Personal Cognitive Model (Continual Online Learning)
-      const model = await db.get('personal_model', DEFAULT_NER_PROFILE.patientId);
+      const model = await db.get('personal_model', this.activePatientId);
       if (model) {
         this.cachedPersonalModel = model;
       } else if (this.cachedObservations.length > 0) {
         this.cachedPersonalModel = PersonalizationEngine.rebuildPersonalModelFromObservations(
-          DEFAULT_NER_PROFILE.patientId,
-          this.cachedObservations,
-          this.cachedTransfers
+          this.activePatientId,
+          this.cachedObservations.filter((o) => o.patientId === this.activePatientId),
+          this.cachedTransfers.filter((t) => t.patientId === this.activePatientId)
         );
         await db.put('personal_model', this.cachedPersonalModel);
       } else {
-        this.cachedPersonalModel = createInitialPersonalModel(DEFAULT_NER_PROFILE.patientId);
+        this.cachedPersonalModel = createInitialPersonalModel(this.activePatientId);
         await db.put('personal_model', this.cachedPersonalModel);
       }
 
@@ -261,26 +355,26 @@ export class IndexedDbStorageService {
       });
     } else {
       // In-memory fallback
-      if (!this.memoryStore.profile.has(DEFAULT_NER_PROFILE.patientId)) {
+      if (!this.memoryStore.profile.has(this.activePatientId)) {
         this.memoryStore.profile.set(DEFAULT_NER_PROFILE.patientId, DEFAULT_NER_PROFILE);
       }
-      this.cachedProfile = this.memoryStore.profile.get(DEFAULT_NER_PROFILE.patientId)!;
+      this.cachedProfile = this.memoryStore.profile.get(this.activePatientId) || DEFAULT_NER_PROFILE;
       this.cachedObservations = Array.from(this.memoryStore.observations.values());
       this.cachedOutbox = Array.from(this.memoryStore.outbox.values());
       this.cachedTransfers = [...this.memoryStore.transfers];
 
-      if (this.memoryStore.personalModel.has(DEFAULT_NER_PROFILE.patientId)) {
-        this.cachedPersonalModel = this.memoryStore.personalModel.get(DEFAULT_NER_PROFILE.patientId)!;
+      if (this.memoryStore.personalModel.has(this.activePatientId)) {
+        this.cachedPersonalModel = this.memoryStore.personalModel.get(this.activePatientId)!;
       } else if (this.cachedObservations.length > 0) {
         this.cachedPersonalModel = PersonalizationEngine.rebuildPersonalModelFromObservations(
-          DEFAULT_NER_PROFILE.patientId,
-          this.cachedObservations,
-          this.cachedTransfers
+          this.activePatientId,
+          this.cachedObservations.filter((o) => o.patientId === this.activePatientId),
+          this.cachedTransfers.filter((t) => t.patientId === this.activePatientId)
         );
-        this.memoryStore.personalModel.set(DEFAULT_NER_PROFILE.patientId, this.cachedPersonalModel);
+        this.memoryStore.personalModel.set(this.activePatientId, this.cachedPersonalModel);
       } else {
-        this.cachedPersonalModel = createInitialPersonalModel(DEFAULT_NER_PROFILE.patientId);
-        this.memoryStore.personalModel.set(DEFAULT_NER_PROFILE.patientId, this.cachedPersonalModel);
+        this.cachedPersonalModel = createInitialPersonalModel(this.activePatientId);
+        this.memoryStore.personalModel.set(this.activePatientId, this.cachedPersonalModel);
       }
 
       this.cachedRecentFingerprints.clear();
@@ -364,7 +458,147 @@ export class IndexedDbStorageService {
     }
   }
 
-  // --- PATIENT PROFILE ---
+  // --- PATIENT PROFILE & USER-SCOPED STORAGE ---
+  private static activePatientId: string = 'patient-ner-001';
+
+  public static getActivePatientId(): string {
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem('ner_mind_active_patient_id');
+      if (stored) return stored;
+    }
+    return this.activePatientId;
+  }
+
+  public static async setActivePatientId(patientId: string): Promise<PersonalMemoryProfile> {
+    this.activePatientId = patientId;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('ner_mind_active_patient_id', patientId);
+    }
+    const db = await this.getDB();
+    if (db) {
+      let p = await db.get('patient_profile', patientId);
+      if (!p) {
+        p = patientId === SECONDARY_NER_PROFILE.patientId
+          ? SECONDARY_NER_PROFILE
+          : { ...DEFAULT_NER_PROFILE, patientId, displayName: `Patient ${patientId}` };
+        await db.put('patient_profile', p);
+      }
+      this.cachedProfile = p;
+      return p;
+    } else {
+      let p = this.memoryStore.profile.get(patientId);
+      if (!p) {
+        p = patientId === SECONDARY_NER_PROFILE.patientId
+          ? SECONDARY_NER_PROFILE
+          : { ...DEFAULT_NER_PROFILE, patientId, displayName: `Patient ${patientId}` };
+        this.memoryStore.profile.set(patientId, p);
+      }
+      this.cachedProfile = p;
+      return p;
+    }
+  }
+
+  /**
+   * Returns all registered profiles on this device.
+   * In Single-Device Profile Mode, exactly one active profile content is maintained at any time.
+   */
+  public static async getAllPatientProfiles(): Promise<PersonalMemoryProfile[]> {
+    const current = this.getPatientProfile();
+    return [current];
+  }
+
+  /**
+   * Creates a new patient profile on this device.
+   * Single Device Invariant: When a new profile is added, any previous profile
+   * is automatically signed out and replaced as the sole active profile on this device.
+   */
+  public static async createPatientProfile(profile: PersonalMemoryProfile): Promise<PersonalMemoryProfile> {
+    // 1. Terminate previous session to guarantee single profile per device
+    LocalAuthService.logout();
+
+    const previousId = this.activePatientId;
+
+    const db = await this.getDB();
+    if (db) {
+      try {
+        await db.clear('patient_profile');
+      } catch { }
+      await db.put('patient_profile', profile);
+    } else {
+      this.memoryStore.profile.clear();
+      this.memoryStore.profile.set(profile.patientId, profile);
+    }
+
+    this.cachedProfile = profile;
+    this.activePatientId = profile.patientId;
+
+    if (typeof localStorage !== 'undefined') {
+      // Clear previous active session and custom patient data
+      localStorage.removeItem('ner_mind_active_session');
+      localStorage.removeItem('ner_mind_local_session');
+      if (previousId && previousId !== profile.patientId) {
+        localStorage.removeItem(`ner_mind_patient_profile_${previousId}`);
+      }
+      localStorage.setItem('ner_mind_active_patient_id', profile.patientId);
+      localStorage.setItem(`ner_mind_patient_profile_${profile.patientId}`, JSON.stringify(profile));
+      localStorage.setItem('ner_mind_custom_patient_ids', JSON.stringify([profile.patientId]));
+    }
+
+    // Initialize fresh personal model for this single active patient
+    const newModel = createInitialPersonalModel(profile.patientId);
+    await this.savePersonalModel(newModel);
+
+    await this.enqueueSyncEvent('memory_profile_updated', profile as any);
+    return profile;
+  }
+
+  public static getPatientStorageKey(baseKey: string, patientId?: string): string {
+    const id = patientId || this.getActivePatientId();
+    return `${baseKey}_${id}`;
+  }
+
+  public static getUserScopedData<T>(baseKey: string, defaultFallback: T, patientId?: string): T {
+    if (typeof localStorage === 'undefined') return defaultFallback;
+    try {
+      const scopedKey = this.getPatientStorageKey(baseKey, patientId);
+      const stored = localStorage.getItem(scopedKey);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed as unknown as T;
+        if (!Array.isArray(parsed) && parsed !== null) return parsed as unknown as T;
+      }
+      // Check legacy global key if patientId is primary default patient
+      const legacy = localStorage.getItem(baseKey);
+      if (legacy && (!patientId || patientId === DEFAULT_NER_PROFILE.patientId)) {
+        const parsed = JSON.parse(legacy);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed as unknown as T;
+        if (!Array.isArray(parsed) && parsed !== null) return parsed as unknown as T;
+      }
+    } catch { }
+    return defaultFallback;
+  }
+
+  public static setUserScopedData<T>(baseKey: string, data: T, patientId?: string): void {
+    const scopedKey = this.getPatientStorageKey(baseKey, patientId);
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem(scopedKey, JSON.stringify(data));
+        const id = patientId || this.getActivePatientId();
+        if (id === DEFAULT_NER_PROFILE.patientId) {
+          localStorage.setItem(baseKey, JSON.stringify(data));
+        }
+      } catch (e) {
+        console.warn('[UserScopedStorage] Failed to save in localStorage:', e);
+      }
+    }
+
+    // Persist permanently into IndexedDB app_data store
+    this.getDB().then((db) => {
+      if (db && db.objectStoreNames.contains('app_data')) {
+        db.put('app_data', data, scopedKey).catch(() => { });
+      }
+    }).catch(() => { });
+  }
 
   public static getPatientProfile(): PersonalMemoryProfile {
     return this.cachedProfile;
